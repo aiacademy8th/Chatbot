@@ -17,4 +17,5 @@ dependencies = [
     "pydantic-settings>=2.4.0",
     "pypdf>=6.6.0",
     "pymupdf>=1.26.7",
+    "langchain-postgres>=0.0.16",
 ]
