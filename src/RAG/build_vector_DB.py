@@ -1,128 +1,171 @@
 import os
-import argparse
 import logging
 from pathlib import Path
+import urllib.parse
 
+import psycopg2
 from dotenv import load_dotenv
+from google.cloud import storage
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
+# 기존 FAISS 를 사용하던 구조에서 PGVectorStore 를 사용하던 방식으로 변경
+#from langchain_community.vectorstores import FAISS
+from langchain_postgres import PGVector, PGEngine
+from sqlalchemy import create_engine
 
 # --- 1. 로깅 설정 (개선된 부분) ---
 # print() 대신 표준 로깅 모듈을 사용하여 로그의 레벨 관리와 포맷팅을 체계화합니다.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_api_key():
-    """환경 변수에서 OpenAI API 키를 로드합니다."""
+def load_env_config():
+    """환경 변수를 로드하고 필수 설정을 확인"""
     load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        logging.error("OPENAI_API_KEY가 .env 파일에 설정되지 않았습니다.")
-        raise ValueError("API 키가 없습니다.")
-    return api_key
-
-def load_and_split_documents(file_path: Path) -> list:
-    """PDF 문서를 로드하고 텍스트를 청크로 분할합니다."""
-    if not file_path.exists():
-        logging.error(f"'{file_path}' 파일을 찾을 수 없습니다.")
-        raise FileNotFoundError(f"지정된 경로에 파일이 없습니다: {file_path}")
+    required_vars = ["OPENAI_API_KEY", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"]
+    for var in required_vars:
+        if not os.getenv(var):
+            logging.error(f"{var}가 .env 파일에 설정되지 않음.")
+            raise ValueError(f"필수 설정 누락: {var}")
     
-    logging.info(f"'{file_path}' 파일 로드를 시작합니다...")
-    loader = PyMuPDFLoader(str(file_path))
-    pages = loader.load()
-    logging.info(f"로드 완료: 총 {len(pages)} 페이지")
+    # 비밀번호 특수문자(@) 처리를 위한 인코딩
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    host = os.getenv("DB_HOST")
+    port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME")
+        
+    # SQLAlchemy 스타일 연결 문자열 생성 (PGVectorStore용)
+    conn_str = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db_name}"
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=100,
-        add_start_index=True
+    return conn_str
+
+# --- 2. DB 및 GCS 연동 함수 
+def get_pending_files():
+    """DB에서 아직 벡터화 되지 않은(is_vectorized = false) 파일 목록을 가져옴"""
+
+    raw_password = urllib.parse.unquote(os.getenv("DB_PASSWORD"))
+
+    # psycopg2는 별도 인코딩 없이 비밀번호 바로 사용 가능
+    conn = psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        database=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=raw_password,
+        port=os.getenv("DB_PORT", "5432")
     )
-    chunks = text_splitter.split_documents(pages)
-    logging.info(f"청킹 완료: 총 {len(chunks)} 청크 생성")
-    return chunks
 
-def create_and_save_vector_db(chunks: list, save_path: Path):
-    """임베딩을 생성하고 벡터 DB를 로컬에 저장합니다."""
-    logging.info("임베딩 생성 및 FAISS 벡터 DB 저장 중...")
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    
-    vector_db = FAISS.from_documents(chunks, embeddings)
-    
-    # 저장 경로가 존재하지 않으면 생성
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    vector_db.save_local(str(save_path))
-    logging.info(f"벡터 DB를 '{save_path}'에 성공적으로 저장했습니다.")
-    return embeddings, save_path
+    cur = conn.cursor()
+    cur.execute("SELECT file_name FROM pdf_documents WHERE is_vectorized = FALSE")
+    files = [row[0] for row in cur.fetchall()]
+    cur.close()
+    conn.close()
 
-def verify_db(save_path: Path, embeddings):
-    """저장된 벡터 DB를 검증합니다."""
-    logging.info("저장된 벡터 DB 검증 시작...")
-    vector_db = FAISS.load_local(str(save_path), embeddings, allow_dangerous_deserialization=True)
-    logging.info(f"전체 벡터 개수: {vector_db.index.ntotal}")
-    
-    # 일부 문서 내용 확인
+    return files
+
+def update_db_status(file_name, status="completed"):
+    """처리가 완료된 파일의 상태를 DB에 업데이트."""
+
+    raw_password = urllib.parse.unquote(os.getenv("DB_PASSWORD"))
+
+    conn = psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        database=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=raw_password,
+        port=os.getenv("DB_PORT", "5432")
+    )
+
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE pdf_documents SET is_vectorized = TRUE, status = %s WHERE file_name = %s",
+        (status, file_name)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def process_file(file_name, bucket_name, vector_store):
+    """GCS에서 다운로드 후 텍스트 분할 및 벡터 저장을 수행"""
+    local_path = Path(f"./temp_{file_name}")
+
     try:
-        docstore_dict = vector_db.docstore._dict
-        logging.info("--- 저장된 문서 샘플 (상위 5개) ---")
-        for i, (key, doc) in enumerate(docstore_dict.items()):
-            logging.info(f"문서 {i+1}: {doc.page_content[:100]}...")
-            if i >= 4:
-                break
+        key_path = os.getenv("GCS_KEY_PATH")
+        if not key_path:
+            raise ValueError("GCS_KEY_PATH 가 .env에 설정되지 않음")
+
+        # GCS 다운로드
+        storage_client = storage.Client.from_service_account_json(key_path)
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(file_name)
+        blob.download_to_filename(str(local_path))
+        logging.info(f"📥 '{file_name}' 다운로드 완료")
+
+        # 문서 로드 및 분할
+        loader = PyMuPDFLoader(str(local_path))
+        pages = loader.load()
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=100,
+            add_start_index=True
+        )
+
+        chunks = text_splitter.split_documents(pages)
+
+        # 메타데이터 주입 (출처 추적용)
+        for chunk in chunks:
+            chunk.metadata["source"] = file_name
+
+        # PGVectorStore 저장
+        vector_store.add_documents(chunks)
+        logging.info(f"✨ '{file_name}' 벡터 DB 주입 완료 ({len(chunks)} 청크)")
+
+        return True
+
     except Exception as e:
-        logging.warning(f"문서 샘플 확인 중 오류 발생: {e}")
+        logging.error(f"❌ '{file_name}' 처리 중 오류: {e}")
+        return False
+    finally:
+        if local_path.exists():
+            local_path.unlink()
 
-# --- 2. 커맨드라인 인자 처리 (개선된 부분) ---
-# argparse를 사용하여 파일 경로를 하드코딩하는 대신,
-# 스크립트 실행 시 동적으로 지정할 수 있도록 하여 재사용성을 높입니다.
-def parse_arguments():
-    """스크립트 실행을 위한 커맨드라인 인자를 파싱합니다."""
-    parser = argparse.ArgumentParser(description="PDF 문서를 처리하여 FAISS 벡터 데이터베이스를 생성합니다.")
-    
-    # 현재 파일 위치를 기준으로 기본 경로 설정
-    project_root = Path(__file__).resolve().parent.parent.parent
-    default_input = project_root / "data" / "P02_01_01_001_20210101.pdf"
-    default_output = project_root / "vectorDB" / "faiss_index_samsung_fire"
-
-    parser.add_argument(
-        "--input",
-        type=str,
-        default=str(default_input),
-        help="처리할 PDF 파일의 경로"
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=str(default_output),
-        help="생성된 벡터 DB를 저장할 경로"
-    )
-    return parser.parse_args()
-
-# --- 3. 메인 로직 구조화 (개선된 부분) ---
-# 각 기능(API 키 로드, 문서 처리, DB 생성, 검증)을 별도의 함수로 분리하여
-# 코드의 가독성과 유지보수성을 향상시킵니다.
+# --- 4. 메인 실행 구조 ---
 def main():
-    """메인 실행 함수"""
-    args = parse_arguments()
-    input_path = Path(args.input)
-    output_path = Path(args.output)
-
     try:
-        load_api_key()
-        chunks = load_and_split_documents(input_path)
-        embeddings, saved_path = create_and_save_vector_db(chunks, output_path)
-        verify_db(saved_path, embeddings)
+        connection_string = load_env_config()
+        pending_files = get_pending_files()
+
+        if not pending_files:
+            logging.info("💡 처리할 새로운 파일이 없습니다. 종료합니다.")
+            return
+        
+        logging.info(f"🚀 총 {len(pending_files)}개의 파일 처리를 시작합니다.")
+
+        async_engine = create_engine(connection_string.replace("postgresql+psycopg", "postgresql+psycopg2"))
+
+        # PGVectorStore 초기화
+        vector_store = PGVector(
+            connection=async_engine,
+            embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),
+            collection_name="accident_vectors",
+            use_jsonb=True
+        )
+
+        # 버킷명 설정 
+        bucket_name = "pdf-storage-2026"
+
+        for file_name in pending_files:
+            if process_file(file_name, bucket_name, vector_store):
+                update_db_status(file_name)
+                logging.info(f"✅ DB 상태 갱신 완료: {file_name}")
         
         logging.info("-" * 30)
-        logging.info("🎉 모든 작업이 완료되었습니다!")
-        logging.info(f"📂 벡터 DB 저장 위치: {saved_path.resolve()}")
+        logging.info("🎉 모든 벡터화 작업이 성공적으로 끝났습니다!")
         logging.info("-" * 30)
 
-    except (ValueError, FileNotFoundError) as e:
-        logging.error(f"작업 실패: {e}")
     except Exception as e:
-        logging.error(f"예상치 못한 오류가 발생했습니다: {e}")
-
+        logging.error(f"⚠️ 시스템 오류로 중단됨: {e}")
 
 if __name__ == "__main__":
     main()
