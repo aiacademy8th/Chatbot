@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# GCP 서비스 계정 키 폴더 전체 제외
+json_key/
+
+# 또는 보안을 위해 특정 확장자만 명시적으로 제외하고 싶을 때
+json_key/*.json
