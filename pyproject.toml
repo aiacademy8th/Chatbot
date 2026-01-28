@@ -14,7 +14,7 @@ dependencies = [
     "pymupdf>=1.26.7",
     "beautifulsoup4>=4.14.3",
     "psycopg2-binary>=2.9.11",
-    "psycopg[binary]>=3.3.2",
+    "psycopg[binary,pool]>=3.3.2",
     "langchain-postgres>=0.0.16",
     "aiosqlite>=0.22.1",
     "ipykernel>=7.1.0",
@@ -25,5 +25,7 @@ dependencies = [
     "chromadb>=1.4.1",
     "langchain-huggingface>=1.2.0",
     "langchain-ollama>=1.0.1",
+    "google-cloud-storage>=3.8.0",
+    "pyreadline3>=3.5.4",
 ]
 
