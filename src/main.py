@@ -84,42 +84,40 @@ def health_check():
 
 # main.py (핵심 로직 부분)
 
+# main.py 내 AnalysisResponse 스키마는 동일하게 유지하되 UI에서 필터링합니다.
+
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze(data: AnalysisRequest, request: Request):
     try:
         rag_engine = request.app.state.rag_engine
         decision_engine = request.app.state.decision_engine
 
-        # STEP 1: RAG 검색 (법률/판례 지식 추출)
+        # 1. RAG 실행 (여기서 rag_answer가 이미 여러 문헌을 합친 요약본임)
         search_query = build_query_from_request(data)
-        rag_answer, docs = rag_engine.ask(search_query) # rag_answer는 요약문, docs는 원문 리스트
-        
-        # STEP 2: 데이터 결합 (사용자 정보 + RAG 지식)
-        facts = data.model_dump()
-        facts["rag_context"] = rag_answer # 랭그래프가 읽을 참고 지식 주입
+        rag_answer, docs = rag_engine.ask(search_query)
 
-        # STEP 3: LangGraph 실행 (추론 및 최종 판단)
+        # 2. 데이터 결합 및 LangGraph 실행
+        facts = data.model_dump()
+        facts["rag_context"] = rag_answer
         graph_result = decision_engine.run_analysis(facts)
 
-        # STEP 4: 데이터 포맷팅
+        # 3. 소스 문헌 리스트 구성 (내용은 포함하되 프론트에서 선택적 노출)
         formatted_sources = [
             SourceDoc(
-                content=getattr(doc, "page_content", str(doc)),
+                content=getattr(doc, "page_content", ""),
                 similarity=float(score) if score is not None else 0.0,
-                source=getattr(doc, "metadata", {}).get("source", "법규/판례")
+                source=getattr(doc, "metadata", {}).get("source", "판례/법규")
             ) for doc, score in docs
         ]
 
-        # STEP 5: 결합된 결과 반환
         return AnalysisResponse(
             risk_bucket=graph_result.get("risk_bucket", "정보부족"),
             final_answer=graph_result.get("final_answer", "분석 실패"),
             flags_red=graph_result.get("flags_red", []),
             flags_yellow=graph_result.get("flags_yellow", []),
-            relevant_sources=formatted_sources # 화면에 먼저 보여줄 근거 자료
+            relevant_sources=formatted_sources
         )
     except Exception as e:
-        logging.error(f"❌ 분석 에러: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
