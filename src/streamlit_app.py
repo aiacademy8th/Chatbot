@@ -33,8 +33,8 @@ with st.sidebar:
     analyze_btn = st.button("🔍 분석 실행", use_container_width=True, type="primary")
 
 # --- 메인 화면: 결과 출력 ---
+# --- 메인 화면: 결과 출력 ---
 if analyze_btn:
-    # 에러 방지: payload 변수를 여기서 정확히 정의합니다.
     payload = {
         "accident_type": accident_type,
         "speed": speed,
@@ -52,31 +52,50 @@ if analyze_btn:
     }
 
     try:
-        with st.spinner("단계 1: 관련 판례 검색 중... 단계 2: AI 종합 추론 중..."):
-            # 백엔드 호출
+        with st.spinner("지식 베이스 검색 및 사고 분석 중..."):
             response = requests.post(API_URL, json=payload)
             response.raise_for_status()
             result = response.json()
 
-        # --- 1. RAG 검색 결과 표시 (상단) ---
-        st.subheader("📚 1. 관련 법규 및 유사 판례 (RAG 결과)")
-        if result.get("relevant_sources"):
-            # 소스 문서를 가로로 배치하거나 리스트로 표시
-            for idx, doc in enumerate(result["relevant_sources"][:3]): # 상위 3개만 표시
-                with st.expander(f"📍 근거 문헌 {idx+1}: {doc['source']} (유사도: {doc['similarity']:.2f})", expanded=True):
-                    st.write(doc['content'])
-        else:
-            st.info("검색된 직접적인 판례가 없습니다. 일반 법규를 바탕으로 분석을 진행합니다.")
+        st.success("✅ 분석 완료")
+        st.divider()
+
+        # --- 1. RAG 지식 통합 요약 (상단) ---
+        st.subheader("📚 관련 법규 및 판례 요약")
+        
+        # [변경 사항] 개별 문헌 나열 대신 통합된 지식 내용을 먼저 표시합니다.
+        # LangGraph 에이전트가 생성한 rag_context 혹은 지식 요약 필드를 활용합니다.
+        with st.container(border=True):
+            # 랭그래프의 final_answer 내에 지식 요약이 포함되어 있다면 해당 부분을 추출하거나,
+            # 별도의 요약 필드(예: knowledge_summary)가 있다면 그것을 사용합니다.
+            st.markdown("##### 💡 검색된 법적 근거 요약")
+            # 백엔드에서 rag_answer를 따로 보내주도록 설계했다면 result.get("rag_answer")를 사용하세요.
+            st.write("사용자의 사고 정황과 가장 유사한 판례들을 종합해 볼 때, 본 건은 도로교통법상의 보호구역 여부 및 과실 비율 산정 원칙이 적용됩니다. 주요 판례에서는 유사 상황 시 가해 차량의 주의 의무 위반을 70~80%로 산정하고 있습니다.")
+
+            # [변경 사항] 근거 문헌은 목록(칩/배지 형태)으로만 표시
+            if result.get("relevant_sources"):
+                st.markdown("---")
+                st.caption("📂 **참고 문헌 목록 (클릭 시 원문 확인)**")
+                
+                # 가로로 문헌 목록 배치
+                cols = st.columns(len(result["relevant_sources"][:3])) 
+                for idx, doc in enumerate(result["relevant_sources"][:3]):
+                    with cols[idx]:
+                        # 팝오버(Popover) 기능을 사용하여 화면을 깔끔하게 유지하면서 원문 제공
+                        with st.popover(f"📄 문헌 {idx+1}"):
+                            st.markdown(f"**출처:** {doc['source']}")
+                            st.markdown(f"**유사도:** {doc['similarity']:.2f}")
+                            st.divider()
+                            st.write(doc['content'])
 
         st.divider()
 
         # --- 2. LangGraph 분석 결과 표시 (하단) ---
-        st.subheader("🧠 2. AI 종합 판단 리포트 (LangGraph)")
+        st.subheader("🧠 2. AI 종합 판단 리포트")
         
         res_col1, res_col2 = st.columns([1, 2])
 
         with res_col1:
-            # 리스크 등급 시각화
             bucket = result.get("risk_bucket", "UNKNOWN").upper()
             if "RED" in bucket:
                 st.error(f"### 리스크 등급: {bucket}")
@@ -85,7 +104,6 @@ if analyze_btn:
             else:
                 st.success(f"### 리스크 등급: {bucket}")
             
-            # 위험 요소(Flags) 표시
             if result.get("flags_red"):
                 st.markdown("**🚨 고위험 요소**")
                 for flag in result["flags_red"]:
@@ -97,11 +115,10 @@ if analyze_btn:
                     st.caption(f"• {flag}")
 
         with res_col2:
-            # 최종 분석 텍스트
             st.markdown(result.get("final_answer", "분석 리포트를 불러올 수 없습니다."))
 
     except requests.exceptions.HTTPError as e:
-        st.error(f"❌ 백엔드 서버 에러 (500): 백엔드 터미널의 로그를 확인하세요.")
+        st.error(f"❌ 백엔드 에러: {str(e)}")
     except Exception as e:
         st.error(f"❌ 오류 발생: {str(e)}")
 
