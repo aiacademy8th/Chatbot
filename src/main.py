@@ -19,7 +19,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-#load_dotenv()
+load_dotenv()
 
 # --- 데이터 스키마 ---
 class AnalysisRequest(BaseModel):
