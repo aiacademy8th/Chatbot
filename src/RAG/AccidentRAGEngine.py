@@ -1,8 +1,9 @@
 import os
 import logging
 import base64
+import asyncio
 from io import BytesIO
-from PIL import Image  # 이미지 처리를 위해 추가 (pip install Pillow)
+from PIL import Image       # 이미지 처리를 위해 추가
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_postgres import PGVector
@@ -18,11 +19,10 @@ class AccidentRAGEngine:
         load_dotenv()
         self.threshold = similarity_threshold
         self.vector_store = self._get_vector_store()
-        
-        # [최적화] 온도 0, max_tokens 설정으로 응답 속도 및 일관성 확보
+
+        # temperature 0
         self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        self.vision_parser = StrOutputParser()
-        logging.info(f"AccidentRAGEngine(Multimodal) 초기화 완료")
+        logging.info(f"AccidentRAGEngine 초기화 완료")
 
     def _get_vector_store(self):
         user = os.getenv("DB_USER")
@@ -37,116 +37,121 @@ class AccidentRAGEngine:
         return PGVector(
             connection=engine,
             embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),
-            collection_name="accident_vectors",
+            collection_name="accident_vectors", # [수정] 콤마 추가
             use_jsonb=True
         )
-
+    
     def _encode_image(self, image_path):
         """
-        [최적화] 이미지 리사이징 후 Base64 인코딩
-        원본 이미지가 너무 크면 전송/분석이 느려지므로 최대 크기(1024px)로 조정합니다.
+        최적화를 위해 이미지 리사이징 (Standard Method)
+        원본이 클 경우 전송 속도 저하의 주원인이 되므로 1024px로 제한합니다.
         """
         try:
             with Image.open(image_path) as img:
-                # RGB로 변환 (PNG 투명도 문제 방지)
-                if img.mode in ('RGBA', 'P'):
-                    img = img.convert('RGB')
-                
-                # 이미지 리사이징 (최대 1024x1024 유지)
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")        # JPG 변환을 위해 모드 변경
+
+                # 비율 유지하며 최대 1024x1024 로 축소
                 img.thumbnail((1024, 1024))
-                
+
                 buffered = BytesIO()
-                img.save(buffered, format="JPEG", quality=85) # JPEG 압축
+                img.save(buffered, format="JPEG", quality=85)   # 압축률 85%
                 return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
         except Exception as e:
-            logging.error(f"이미지 전처리 실패: {e}")
-            # 실패 시 원본 그대로 시도
+            logging.error(f"이미지 리사이징 실패, 원본 사용: {e}")
             with open(image_path, "rb") as image_file:
                 return base64.b64encode(image_file.read()).decode("utf-8")
-        
-    def _analyze_image_for_search(self, image_base64):
+            
+    async def analyze_image_async(self, image_base64_list):
         """
-        [최적화] 검색용 키워드 추출 (간결하게 요청)
+        최적화를 위해 비동기 이미지 분석 & 토큰 제한
+        여러장의 이미지를 동시에 분석
         """
-        prompt = [
-            SystemMessage(content="교통사고 분석가입니다. 핵심 키워드만 간결하게 나열하세요."),
-            HumanMessage(content=[
-                {"type": "text", "text": "차량 위치, 파손 부위, 신호등, 차선 등 사고 과실 판단에 필요한 핵심 요소만 3줄 이내로 요약해."},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "low"}} # [최적화] detail="low"로 설정하여 토큰 절약
-            ])
-        ]
-        # max_tokens를 제한하여 빠른 응답 유도
-        return self.llm.invoke(prompt, config={"max_tokens": 150}).content
 
+        # 기본 텍스트 메시지
+        content_list = [
+            {"type": "text", "text": "차량 위치, 파손 부위 신호등, 차선 등 과실 판단 핵심 요소 5줄 요약"}
+        ]
+
+        # 이미지 개수만큼 반복해서 추가
+        for img_b64 in image_base64_list:
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}
+            })
+
+        prompt = [
+            SystemMessage(content="교통사고 분석가 입니다. 여러 장의 사진을 종합하여 핵심 정황을 요약하세요."),
+            HumanMessage(content=content_list)
+        ]
+
+        # ainvoke 사용 (비동기 호출) + max_tokens 제한
+        response = await self.llm.ainvoke(prompt, config={"max_tokens": 400})
+        return response.content
+    
     def _get_relevant_docs(self, query):
-        # [최적화] 검색 개수(k)를 5개로 줄여서 DB 부하 감소
+        # 최적화 검색 후보군(k)을 줄여 DB 부하 감소
         docs_with_scores = self.vector_store.similarity_search_with_score(query, k=5)
         relevant_docs = []
         for doc, score in docs_with_scores:
-            similarity = 1 - (score / 2.0)
+            similarity = 1 - (score / 2.0) # [수정] 오타 수정 (similrarity -> similarity)
             if similarity >= self.threshold:
-                relevant_docs.append((doc, similarity)) # 튜플 형태로 저장
-        
-        # 상위 3개만 반환
-        return relevant_docs[:3]
+                relevant_docs.append((doc, similarity))
+
+        return relevant_docs[:3]    # 상위 3개만 사용
 
     def _format_docs_for_synthesis(self, docs_with_scores):
-        if not docs_with_scores: return "관련 문서를 찾을 수 없습니다."
+        if not docs_with_scores: 
+            return "관련 문서를 찾을 수 없습니다."
         
         formatted_parts = []
         for idx, (doc, score) in enumerate(docs_with_scores, 1):
-            source = doc.metadata.get("source", "알 수 없음")
-            # [최적화] LLM에 들어갈 텍스트 양을 줄이기 위해 page_content 일부만 사용하거나 요약할 수 있음
-            # 현재는 전체 사용하되 로그만 남김
-            formatted_parts.append(
-                f"=== 문서 {idx} (출처: {source}) ===\n{doc.page_content}\n"
-            )
+            source = doc.metadata.get("source", "알 수 없음") # [수정] 오타 수정 (metadate -> metadata)
+            formatted_parts.append(f"=== 문서 {idx} (출처: {source}) ===\n{doc.page_content}\n")
+        
         return "\n\n".join(formatted_parts)
 
-    def ask(self, query: str, image_path: str = None):
+    async def ask_with_context(self, query: str, image_description: str, image_base64_list: list = None):
+        """
+        최적화 병렬 처리된 데이터를 받아 최종 답변만 생성하는 메서드
+        """
+
+        # 1. 검색 쿼리 구성
         search_query = query
-        image_base64 = None
-        image_description = ""
+        if image_description:
+            search_query = f"상황: {image_description}\n 질문: {query}"
 
-        # 1. 이미지 처리 (이미지가 있을 때만 수행)
-        if image_path and os.path.exists(image_path):
-            try:
-                logging.info(f"이미지 처리 시작: {image_path}")
-                image_base64 = self._encode_image(image_path)
-                
-                # 1-1. 검색용 텍스트 생성 (1차 LLM 호출 - 병목 지점)
-                image_description = self._analyze_image_for_search(image_base64)
-                search_query = f"상황: {image_description}\n질문: {query}"
-                
-            except Exception as e:
-                logging.error(f"이미지 처리 오류: {e}")
-
-        # 2. 문서 검색
-        logging.info("RAG 문서 검색 시작...")
-        relevant_docs = self._get_relevant_docs(search_query)
+        # 2. 문서 검색 (I/O 작업 이므로 비동기 래핑)
+        # PGVector의 similarity_search는 동기 함수이므로 스레드로 분리하여 논블로킹 처리
+        relevant_docs = await asyncio.to_thread(self._get_relevant_docs, search_query)
         context = self._format_docs_for_synthesis(relevant_docs)
 
-        # 3. 최종 답변 생성
+        # 3. 최종 프롬프트 구성
         system_prompt = f"""당신은 교통사고 판단 보조 AI입니다.
-        [법률 정보] {context}
-        
-        위 정보를 바탕으로 핵심만 간결하게 답변하세요.
+        [검색된 법률 정보]
+        {context}
+
+        위 법률 정보와 사용자의 진술/사진을 종합하여 판단하세요.
         """
 
         messages = [SystemMessage(content=system_prompt)]
         user_content = [{"type": "text", "text": query}]
-        
+
         if image_description:
             user_content.append({"type": "text", "text": f"(이미지 분석 요약: {image_description})"})
-        
-        if image_base64:
-            # [최적화] detail="auto" 또는 "low" 사용
-            user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "auto"}})
+
+        # 최종 답변 생성 시에도 여러장의 사진 보여주기
+        if image_base64_list:
+            for img_b64 in image_base64_list:
+                user_content.append({
+                    "type": "image_url", 
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "auto"}
+                })
 
         messages.append(HumanMessage(content=user_content))
-        
-        logging.info("최종 답변 생성 중...")
-        # 스트리밍을 사용하지 않는다면 invoke 사용
-        answer = self.llm.invoke(messages).content
-        
-        return answer, relevant_docs
+
+        #  4. 최종 답변 생성 (비동기)
+        response = await self.llm.ainvoke(messages)
+
+        return response.content, relevant_docs

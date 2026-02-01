@@ -15,10 +15,13 @@ with col1:
     st.header("1. 정보 입력")
 
     # 이미지 업로드
-    uploaded_image = st.file_uploader("📸 사고 현장 사진 (선택)", type=["jpg", "png", "jpeg"])
-    if uploaded_image:
-        # [수정] 오타 수정: 업도르된 -> 업로드된
-        st.image(uploaded_image, caption="업로드된 사진", use_container_width=True)
+    uploaded_images = st.file_uploader(
+        "📸 사고 현장 사진 (여러장 )", 
+        type=["jpg", "png", "jpeg"],
+        accept_multiple_files=True)
+    if uploaded_images:
+        # 여러 장을 갤러리 형태로 보여줌
+        st.image(uploaded_images, caption=[f"사진 {i + 1}" for i in range(len(uploaded_images))], width=200)
 
     # 음성 녹음
     st.markdown("#### 🎤 사고 정황 설명")
@@ -34,13 +37,14 @@ with col2:
             with st.spinner("음성 분석 및 판례 검색 중입니다... (최대 30초 소요)"):
                 try:
                     # 파일 준비
-                    files = {
-                        "voice_file": ("voice.wav", audio_value, "audio/wav")
-                    }
+                    files = [
+                        ("voice_file", ("voice.wav", audio_value, "audio/wav"))
+                    ]
                     
-                    if uploaded_image:
-                        # 파일명, 데이터, MIME 타입 순서
-                        files["image_file"] = (uploaded_image.name, uploaded_image, uploaded_image.type)
+                    if uploaded_images:
+                       for img in uploaded_images:
+                           # 키 값을 "image_files"로 통일 하여 리스트로 전송 (FastAPI 규칙)
+                           files.append(("image_files", (img.name, img, img.type)))
                     
                     # 서버 요청
                     # [추가] timeout 설정: GPT 분석이 길어질 수 있으므로 넉넉하게 60초 설정
