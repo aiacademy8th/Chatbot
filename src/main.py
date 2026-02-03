@@ -1,127 +1,125 @@
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-import logging
-from typing import List, Optional, Dict, Any
-from contextlib import asynccontextmanager
-from dotenv import load_dotenv
+import os
+import sys
+import shutil
+import asyncio
+import uuid
+import json
+from typing import List, Optional
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from langchain_core.messages import HumanMessage
 
-# 엔진 임포트
-try:
-    from LangGraphScripts.accident_engine import AccidentDecisionEngine
-    from RAG.AccidentRAGEngine import AccidentRAGEngine
-except ImportError as e:
-    logging.error(f"Import Error: {e}")
+# -------------------------------------------
+# 현재 파일의 부모 디렉토리를 시스템 경로에 추가
+# 그래야 옆 동네인 'RAG' 폴더를 찾을 수 있음
+# -------------------------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))    # 현재 폴더 경로
+parent_dir = os.path.dirname(current_dir)                   # 상위 프로젝트 루트 경로
+sys.path.append(parent_dir)
 
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+# 모듈 import
+from STT.google_stt_handler import GoogleSTTHandler
+from LangGraphScripts.AccidentGraph import graph_app
 
-load_dotenv()
+# FastAPI 앱 정의
+app = FastAPI(title="교통사고 대응 AI (Supervisor Agent)")
+stt_handler = GoogleSTTHandler()
 
-# --- 데이터 스키마 ---
-class AnalysisRequest(BaseModel):
-    accident_type: str
-    speed: str
-    injury: str
-    pain_now: str
-    hospital_visit: str
-    vehicle_damage: str
-    adas_sensor: str
-    vehicle_type: str
-    evidence: str
-    opponent_attitude: str
-    opponent_mentions_hospital: str
-    opponent_mentions_insurance: str
-    notes: str
+# 임시 저장소 설정
+TEMP_DIR = "temp_uploads"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-class SourceDoc(BaseModel):
-    content: str
-    similarity: float
-    source: str
+@app.post("/analyze")
+async def analyze_accident(
+    voice_file: UploadFile = File(None),
+    text_query: str = Form(None),
+    image_files: List[UploadFile] = File(None),
+    thread_id: str = Form(None)     # 멀티턴 세션 ID
+):
+    temp_voice_path = None
+    temp_image_paths = []
+    transcript = ""
 
-class AnalysisResponse(BaseModel):
-    risk_bucket: str                    # LangGraph 결과: GREEN|YELLOW|RED
-    final_answer: str                   # LangGraph의 최종 판단 리스트
-    flags_red: List[str]                # 고위험 요소 리스트
-    flags_yellow: List[str]             # 주의 요소 리스트
-    relevant_sources: List[SourceDoc]   # RAG가 찾은 근거 문서들
-
-# --- 유틸리티 ---
-def build_query_from_request(req: AnalysisRequest) -> str:
-    return (
-        f"사고 유형: {req.accident_type}, 속도: {req.speed}, 부상: {req.injury}, "
-        f"통증: {req.pain_now}, 파손: {req.vehicle_damage}, 상대 태도: {req.opponent_attitude}. "
-        f"메모: {req.notes}. 관련 대응법과 판례 알려줘."
-    )
-
-# --- Lifespan: 엔진은 여기서 한 번만 생성합니다 ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logging.info("🚀 엔진 초기화 중 (RAG + LangGraph)...")
     try:
-        app.state.rag_engine = AccidentRAGEngine()
-        app.state.decision_engine = AccidentDecisionEngine()
-        logging.info("✅ 모든 엔진 로드 완료")
-    except Exception as e:
-        logging.error(f"❌ 엔진 초기화 실패: {e}")
-    yield
-    # 종료 시 리소스 정리
-    if hasattr(app.state, "rag_engine"):
-        del app.state.rag_engine
-    if hasattr(app.state, "decision_engine"):
-        del app.state.decision_engine
-    logging.info("🛑 엔진 리소스 해제 완료")
+        # --- 1. 입력 소스 처리 ---
+        if voice_file:
+            ext = voice_file.filename.split('.')[-1]
+            temp_voice_path = os.path.join(TEMP_DIR, f"voice_{uuid.uuid4()}.{ext}")
 
-# FastAPI 앱 생성 (lifespan 전달)
-app = FastAPI(title="교통사고 판단 보조 API", lifespan=lifespan)
+            with open(temp_voice_path, "wb") as buffer:
+                shutil.copyfileobj(voice_file.file, buffer)
 
-@app.get("/")
-def health_check():
-    return {"status": "ok", "message": "Accident Engine is healthy."}
+            transcript = await asyncio.to_thread(stt_handler.transcribe_audio, temp_voice_path)
+            print(f"📝 [STT]: {transcript}")
 
-# main.py (핵심 로직 부분)
-
-@app.post("/analyze", response_model=AnalysisResponse)
-async def analyze(data: AnalysisRequest, request: Request):
-    try:
-        rag_engine = request.app.state.rag_engine
-        decision_engine = request.app.state.decision_engine
-
-        # STEP 1: RAG 검색 (법률/판례 지식 추출)
-        search_query = build_query_from_request(data)
-        rag_answer, docs = rag_engine.ask(search_query) # rag_answer는 요약문, docs는 원문 리스트
+            if not transcript or transcript == "(인식된 음성 내용 없음)":
+                if not text_query:
+                    return {"answer": "음성 인식 실패. 텍스트로 입력해주세요."}
+                
+        # 텍스트 입력 병합
+        if text_query:
+            if transcript:
+                transcript = f"{transcript} (추가 메모: {text_query})"
+            else:
+                transcript = text_query
+        if not transcript and not image_files:
+            raise HTTPException(status_code=400, detail="입력 데이터(음성, 텍스트, 사진)가 없습니다.")
         
-        # STEP 2: 데이터 결합 (사용자 정보 + RAG 지식)
-        facts = data.model_dump()
-        facts["rag_context"] = rag_answer # 랭그래프가 읽을 참고 지식 주입
+        # --- 2. 이미지 파일 저장 ---
+        if image_files:
+            for img_file in image_files:
+                ext = img_file.filename.split(".")[-1]
+                path = os.path.join(TEMP_DIR, f"img_{uuid.uuid4()}.{ext}")
+                with open(path, "wb") as buffer:
+                    shutil.copyfileobj(img_file.file, buffer)
+                temp_image_paths.append(path)
 
-        # STEP 3: LangGraph 실행 (추론 및 최종 판단)
-        graph_result = decision_engine.run_analysis(facts)
+        # --- 3. Supervisor Graph 실행 ---
+        # (1) Thread ID 관리
+        if not thread_id:
+            thread_id = str(uuid.uuid4())
+            print(f"🆕 새로운 대화 세션 생성: {thread_id}")
 
-        # STEP 4: 데이터 포맷팅
-        formatted_sources = [
-            SourceDoc(
-                content=getattr(doc, "page_content", str(doc)),
-                similarity=float(score) if score is not None else 0.0,
-                source=getattr(doc, "metadata", {}).get("source", "법규/판례")
-            ) for doc, score in docs
-        ]
+        # (2) Config 설정 (Memory 사용)
+        config = {"configurable": {"thread_id": thread_id}}
 
-        # STEP 5: 결합된 결과 반환
-        return AnalysisResponse(
-            risk_bucket=graph_result.get("risk_bucket", "정보부족"),
-            final_answer=graph_result.get("final_answer", "분석 실패"),
-            flags_red=graph_result.get("flags_red", []),
-            flags_yellow=graph_result.get("flags_yellow", []),
-            relevant_sources=formatted_sources # 화면에 먼저 보여줄 근거 자료
-        )
+        # (3) 초기 상태 주입
+        initial_state = {
+            "messages": [HumanMessage(content=transcript)] if transcript else [],
+            "image_paths": temp_image_paths,
+            "image_summary": "",
+            "rag_context": ""
+        }
+
+        print(f"🤖 Agent 실행 (Thread: {thread_id})...")
+        final_state = await graph_app.ainvoke(initial_state, config=config)
+
+        # --- 4. 결과 추출 ---
+        structured_result = final_state.get("final_result", {})
+        rag_context = final_state.get("rag_context", "검색 결과 없음")
+
+        return {
+            "status": "success",
+            "thread_id": thread_id,
+            "transcript": transcript,
+            "rag_context": rag_context,
+            "result": structured_result
+        }
+
     except Exception as e:
-        logging.error(f"❌ 분석 에러: {str(e)}", exc_info=True)
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # 리소스 정리
+        paths_to_remove = temp_image_paths + ([temp_voice_path] if temp_voice_path else [])
+        for path in paths_to_remove:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except:
+                    pass
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("🚀 벡엔드 서버를 시작합니다 (http://0.0.0.0:8000)...")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
