@@ -28,5 +28,7 @@ dependencies = [
     "google-cloud-storage>=3.8.0",
     "pyreadline3>=3.5.4",
     "python-multipart>=0.0.22",
+    "google-cloud-speech>=2.36.0",
+    "pydub>=0.25.1",
 ]
 
