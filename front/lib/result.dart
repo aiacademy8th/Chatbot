@@ -23,25 +23,25 @@ class ResultScreen extends StatelessWidget {
     return DateTime.now().microsecond % 1000000 + 1;
   }
 
-  // 과실 비율에서 숫자 추출
+  // ⭐⭐⭐ 과실 비율에서 내 과실(첫 번째 숫자) 추출
   int _extractFaultPercentage(String text) {
-    // "30:70" 형식에서 상대 과실(두 번째 숫자) 추출
+    // "20:80" 형식에서 내 과실(첫 번째 숫자) 추출
     final regex = RegExp(r'(\d+)\s*:\s*(\d+)');
     final match = regex.firstMatch(text);
     if (match != null) {
-      return int.parse(match.group(2)!);  // 상대 과실
+      return int.parse(match.group(1)!);  // ⭐ 첫 번째 숫자 = 내 과실
     }
     return 50;  // 기본값
   }
 
-  // 추천 액션 결정
-  String _getRecommendedAction(int opponentFault) {
-    if (opponentFault >= 80) {
-      return '보험 유리';
-    } else if (opponentFault >= 50) {
-      return '보험 권장';
+  // ⭐⭐⭐ 추천 액션 결정 (내 과실 기준)
+  String _getRecommendedAction(int myFault) {
+    if (myFault <= 50) {
+      return '보험 유리';    // 내 과실 1~50%
+    } else if (myFault <= 80) {
+      return '보험 권장';    // 내 과실 51~80%
     } else {
-      return '합의 유리';
+      return '합의 유리';    // 내 과실 81~100%
     }
   }
 
@@ -49,11 +49,11 @@ class ResultScreen extends StatelessWidget {
   Color _getActionColor(String action) {
     switch (action) {
       case '보험 유리':
-        return Colors.red;
+        return Colors.green;    // ⭐ 초록색 (내 과실 낮음 = 유리함)
       case '보험 권장':
-        return Colors.orange;
+        return Colors.orange;   // ⭐ 주황색 (중간)
       case '합의 유리':
-        return Colors.green;
+        return Colors.red;      // ⭐ 빨간색 (내 과실 높음 = 합의 권장)
       default:
         return Colors.grey;
     }
@@ -108,7 +108,7 @@ class ResultScreen extends StatelessWidget {
                         style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold)),
                     ),
                     pw.Expanded(
-                      child: pw.Text('${entry.value}'),
+                      child: pw.Text('${entry.value}', style: pw.TextStyle(font: ttf)),
                     ),
                   ],
                 ),
@@ -121,7 +121,7 @@ class ResultScreen extends StatelessWidget {
             pw.SizedBox(height: 10),
             pw.Text(
               analysisResult['analysis'] ?? '분석 결과가 없습니다.',
-              style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
+              style: pw.TextStyle(fontSize: 12, lineSpacing: 1.5, font: ttf),
             ),
             pw.SizedBox(height: 30),
 
@@ -136,11 +136,11 @@ class ResultScreen extends StatelessWidget {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text('• ${ref['source']}',
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: ttf)),
                       pw.Padding(
                         padding: const pw.EdgeInsets.only(left: 12, top: 4),
                         child: pw.Text(ref['content'],
-                          style: const pw.TextStyle(fontSize: 11)),
+                          style: pw.TextStyle(fontSize: 11, font: ttf)),
                       ),
                     ],
                   ),
@@ -161,12 +161,12 @@ class ResultScreen extends StatelessWidget {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text('⚠️ 주의사항',
-                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, font: ttf)),
                   pw.SizedBox(height: 8),
                   pw.Text(
                     '본 분석 결과는 AI 기반 예측이며, 실제 보험사 또는 법원의 판단과 다를 수 있습니다. '
                     '정확한 과실 비율 판정을 위해서는 전문가와 상담하시기 바랍니다.',
-                    style: const pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 10, font: ttf),
                   ),
                 ],
               ),
@@ -178,13 +178,10 @@ class ResultScreen extends StatelessWidget {
 
     // PDF 저장
     try {
-      final output = await getDownloadsDirectory(); // ⭐ 변경
+      final output = await getDownloadsDirectory();
       final fileName = 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf';
       final file = File('${output!.path}/$fileName');
       await file.writeAsBytes(await pdf.save());
-      // final output = await getApplicationDocumentsDirectory();
-      // final file = File('${output.path}/accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      // await file.writeAsBytes(await pdf.save());
 
       if (context.mounted) {
         print('📁 PDF 저장 경로: ${file.path}'); 
@@ -217,8 +214,8 @@ class ResultScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final faultRatio = analysisResult['fault_ratio'] ?? '50:50';
-    final opponentFault = _extractFaultPercentage(faultRatio);
-    final recommendedAction = _getRecommendedAction(opponentFault);
+    final myFault = _extractFaultPercentage(faultRatio);  // ⭐ 내 과실
+    final recommendedAction = _getRecommendedAction(myFault);  // ⭐ 내 과실 기준
     final actionColor = _getActionColor(recommendedAction);
 
     return Scaffold(
@@ -229,7 +226,6 @@ class ResultScreen extends StatelessWidget {
             icon: const Icon(Icons.share),
             onPressed: () async {
               final pdf = pw.Document();
-              // PDF 생성 로직 (위와 동일)
               await Printing.sharePdf(
                 bytes: await pdf.save(),
                 filename: 'accident_analysis.pdf',
@@ -257,29 +253,29 @@ class ResultScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   
-                  // 신호등 표시
+                  // 신호등 표시 (순서 변경: 초록 → 주황 → 빨강)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _buildTrafficLight(
                         '보험 유리',
-                        Colors.red,
-                        recommendedAction == '보험 유리'
-                        // '80~100%',
+                        Colors.green,      // ⭐ 초록색
+                        recommendedAction == '보험 유리',
+                        '1~50%',          // ⭐ 내 과실 범위
                       ),
                       const SizedBox(width: 32),
                       _buildTrafficLight(
                         '보험 권장',
-                        Colors.orange,
-                        recommendedAction == '보험 권장'
-                        // '50~79%',
+                        Colors.orange,     // ⭐ 주황색
+                        recommendedAction == '보험 권장',
+                        '51~80%',         // ⭐ 내 과실 범위
                       ),
                       const SizedBox(width: 32),
                       _buildTrafficLight(
                         '합의 유리',
-                        Colors.green,
-                        recommendedAction == '합의 유리'
-                        // '~49%',
+                        Colors.red,        // ⭐ 빨간색
+                        recommendedAction == '합의 유리',
+                        '81~100%',        // ⭐ 내 과실 범위
                       ),
                     ],
                   ),
@@ -345,7 +341,6 @@ class ResultScreen extends StatelessWidget {
                                     color: Colors.blue,
                                   ),
                                 ),
-                                // const Text('%', style: TextStyle(fontSize: 16)),
                               ],
                             ),
                             const Text(
@@ -364,7 +359,6 @@ class ResultScreen extends StatelessWidget {
                                     color: Colors.red,
                                   ),
                                 ),
-                                // const Text('%', style: TextStyle(fontSize: 16)),
                               ],
                             ),
                           ],
@@ -473,50 +467,44 @@ class ResultScreen extends StatelessWidget {
 
             const SizedBox(height: 32),
 
-            // PDF 저장 버튼
+            // PDF 저장 & 게시판 저장 버튼
             Padding(
-            padding: const EdgeInsets.all(24),
-            child: Row(
-              children: [
-                // 첫 번째 버튼
-                Expanded(
-                  child: SizedBox(
-                    height: 56,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _generatePDF(context),
-                      icon: const Icon(Icons.picture_as_pdf, size: 24),
-                      label: const Text(
-                        'PDF 저장',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade600,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                children: [
+                  // PDF 저장 버튼
+                  Expanded(
+                    child: SizedBox(
+                      height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _generatePDF(context),
+                        icon: const Icon(Icons.picture_as_pdf, size: 24),
+                        label: const Text(
+                          'PDF 저장',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
-                        elevation: 4,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 4,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                
-                // 두 번째 버튼
-                Expanded(
+                  const SizedBox(width: 12),
+                  
+                  // 게시판 저장 버튼
+                  Expanded(
                     child: SizedBox(
                       height: 56,
                       child: ElevatedButton.icon(
                         onPressed: () async {
-                          // ⭐ 분석 내용 복사
-                          final analysisText =
-                              analysisResult['analysis'] ??
-                              '분석 결과가 없습니다.';
-                          Clipboard.setData(
-                            ClipboardData(text: analysisText),
-                          );
+                          final analysisText = analysisResult['analysis'] ?? '분석 결과가 없습니다.';
+                          Clipboard.setData(ClipboardData(text: analysisText));
 
-                          // 스낵바 표시
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('분석 내용이 복사되었습니다'),
@@ -524,10 +512,7 @@ class ResultScreen extends StatelessWidget {
                             ),
                           );
 
-                          // ⭐ 2초 후 게시판 저장 화면으로 이동
-                          await Future.delayed(
-                            const Duration(seconds: 1),
-                          );
+                          await Future.delayed(const Duration(seconds: 1));
 
                           if (context.mounted) {
                             Navigator.push(
@@ -544,10 +529,7 @@ class ResultScreen extends StatelessWidget {
                         icon: const Icon(Icons.save, size: 24),
                         label: const Text(
                           '게시판 저장',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue.shade600,
@@ -557,13 +539,12 @@ class ResultScreen extends StatelessWidget {
                           ),
                           elevation: 4,
                         ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-
 
             // 주의사항
             Padding(
@@ -602,7 +583,7 @@ class ResultScreen extends StatelessWidget {
   }
 
   // 신호등 위젯
-  Widget _buildTrafficLight(String label, Color color, bool isActive) {
+  Widget _buildTrafficLight(String label, Color color, bool isActive, String range) {
     return Column(
       children: [
         Container(
@@ -622,7 +603,7 @@ class ResultScreen extends StatelessWidget {
                 : null,
           ),
           child: isActive
-              ? Icon(
+              ? const Icon(
                   Icons.check,
                   color: Colors.white,
                   size: 48,
@@ -639,13 +620,13 @@ class ResultScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        // Text(
-        //   range,
-        //   style: TextStyle(
-        //     fontSize: 11,
-        //     color: Colors.grey.shade600,
-        //   ),
-        // ),
+        Text(
+          range,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey.shade600,
+          ),
+        ),
       ],
     );
   }

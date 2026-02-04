@@ -6,7 +6,7 @@ import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 
-bool _chatStarted = false;
+// bool _chatStarted = false;
 
 class ChatbotScreen extends StatefulWidget {
   final List<File> accidentPhotos;
@@ -21,12 +21,14 @@ class ChatbotScreen extends StatefulWidget {
 }
 
 class _ChatbotScreenState extends State<ChatbotScreen> {
+  bool _chatStarted = false;
+
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _textController = TextEditingController();
   
   // OpenAI API 키 (실제 키로 교체 필요!)
-  final openaiApiKey = '';
-  // final openaiApiKey = dotenv.env['OPENAI_API_KEY'];
+  // final openaiApiKey = '';
+  final openaiApiKey = dotenv.env['OPENAI_API_KEY'];
   
   // 채팅 메시지 리스트
   final List<ChatMessage> _messages = [];
@@ -102,12 +104,18 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 @override
 void initState() {
   super.initState();
+
+  final String? openaiApiKey = dotenv.env['OPENAI_API_KEY'];
+  print('-------------------------');
+  print('API 키 확인: $openaiApiKey');
+  print('-------------------------');
+
   
   // 딱 한 번만 실행되도록 보장
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_messages.isEmpty) {
-      _startChat();
-    }
+    // if (_messages.isEmpty) {
+    _startChat();
+    // }
   });
 }
 
