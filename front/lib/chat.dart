@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'result.dart';  
 import 'dart:io';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 
 bool _chatStarted = false;
@@ -24,7 +25,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   final TextEditingController _textController = TextEditingController();
   
   // OpenAI API 키 (실제 키로 교체 필요!)
-  final String _apiKey = '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';
+  final openaiApiKey = '';
+  // final openaiApiKey = dotenv.env['OPENAI_API_KEY'];
   
   // 채팅 메시지 리스트
   final List<ChatMessage> _messages = [];
@@ -329,7 +331,7 @@ List<Map<String, String>> _getRagReferences() {
       url,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer $openaiApiKey',
       },
       body: jsonEncode({
         'model': 'gpt-4o-mini',

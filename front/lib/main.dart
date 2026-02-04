@@ -4,10 +4,14 @@ import 'insurer.dart';
 import 'photo.dart';
 import 'chat.dart';
 import 'emergency.dart'; 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+void main() async {
+  await dotenv.load(fileName: ".env"); // .env 파일 로드
   runApp(const AccidentHelperApp());
 }
+
+
 
 class AccidentHelperApp extends StatelessWidget {
   const AccidentHelperApp({super.key});
