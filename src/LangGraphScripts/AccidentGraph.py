@@ -26,9 +26,6 @@ sys.path.append(parent_dir)
 # 엔진 및 데이터 모델 임포트
 from RAG.AccidentRAGEngine import AccidentRAGEngine, AccidentAnalysisResult, FaultRatio
 
-# 엔진 로드
-engine = AccidentRAGEngine()
-
 # --- 1. 상태(State3) 정의 ---
 class AgentState(TypedDict):
     """
@@ -50,7 +47,27 @@ class AgentState(TypedDict):
     # 최종 결과 (구조화된 데이터 - dict 형태로 저장)
     final_result: dict
 
-# --- 2. 클래스 기반 Agent 정의 ---
+# --- 2. 챗봇 전용 상태 정의
+class ChatState(TypedDict):
+    """
+    챗봇 전용 상태 - 기존 분석 결과를 컨텍스트로 활용
+    """
+    
+    messages: Annotated[List[BaseMessage], operator.add]
+
+    # [컨텍스트] 초기 분석에서 가져온 정보
+    accident_context: str       # 초기 사고 상황 설명
+    vision_summary: str         # Vision 분석 결과
+    initial_rag: str            # 초기 RAG 검색 결과
+    fault_analysis: str         # 과실 비율 판단 결과
+
+    # [실시간 검색] 추가 질문에 대한 RAG 검색
+    additional_rag: str         # 추가 검색된 판례
+
+    # [출력] 최종 답변
+    response: str
+
+# --- 3. 클래스 기반 Agent 정의 ---
 class AccidentGraphAgent:
     """
     교통사고 분석 LangGraph Agent (클래스 기반)
@@ -373,5 +390,127 @@ class AccidentGraphAgent:
 
         return await self.graph_app.ainvoke(initial_state, config=config)
     
+# --- 4. 챗봇 전용 Agent 클래스 ---
+class AccidentChatAgent:
+    """
+    교통사고 후속 질문 챗봇 Agent
+    - 기존 분석 결과를 컨텍스트로 활용
+    - 추기 질문에 대해 RAG 재검색
+    - 스트리밍 응답 지원
+    """
+
+    _shared_engine: Optional[AccidentRAGEngine] = None
+
+    def __init__(self, engine: Optional[AccidentRAGEngine] = None):
+        if engine:
+            self.engine = engine
+        else:
+            if AccidentChatAgent._shared_engine is None:
+                AccidentChatAgent._shared_engine = AccidentRAGEngine()
+            self.engine = AccidentChatAgent._shared_engine
+        
+        self.pool = None
+        self.checkpointer = None
+        self.graph_app = None
+        self.workflow = StateGraph(ChatState)
+        self._build_chat_structure()
+    
+    def _build_chat_structure(self):
+        """챗봇 워크플로우 구조 정의"""
+        # 노드 등록
+        self.workflow.add_node("load_context", self.load_context_node)
+        self.workflow.add_node("search_additional", self.search_additional_node)
+        self.workflow.add_node("generate_response", self.generate_response_node)
+
+        # 워크플로우: Context 로드 -> 추가 검색 -> 응답 생성
+        self.workflow.set_entry_point("load_context")
+        self.workflow.add_edge("load_context", "search_additional")
+        self.workflow.add_edge("search_additional", END)
+
+    async def setup(self):
+        """리소스 설정 (기존 Agent와 동일한 DB 공유)"""
+        logger.info("AccidentChatAgent 리소스 설정 시작...")
+
+        user = os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD")
+        host = os.getenv("DB_HOST")
+        port = os.getenv("DB_PORT", "5432")
+        db_name = os.getenv("DB_NAME")
+        DB_URL = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+        self.pool = AsyncConnectionPool(
+            conninfo=DB_URL,
+            max_size=20,
+            kwargs={"autocommit": True},
+            open=False
+        )
+
+        await self.pool.open()
+        logger.info("[ChatAgent] AsyncConnectionPool 연결 성공")
+
+        self.checkpointer = AsyncPostgresSaver(self.pool)
+        await self.checkpointer.setup() # 테이블 생성
+        logger.info("[ChatAgent] PostgresSaver 테이블 설정 완료")
+
+        # 4. 그래프 컴파일 (이제 graph_app이 완료됨)
+        self.graph_app = self.workflow.compile(checkpointer=self.checkpointer)
+        logger.info("[ChatAgent] 그래프 컴파일 완료 (Ready to serve)")
+
+    async def load_context_node(self, state: ChatState) -> dict:
+        """
+        [Node 1] 기존 분석 결과 로드
+        - 체크포인터에서 초기 분석 상태 조회
+        - accident_context, vision_summary 등 복원
+        """
+        logger.info("[ChatAgent] 컨텍스트 로드 시작")
+
+        # 이미 state에 컨텍스트가 있다면 그래도 사용 (초기 주입)
+        if state.get("accident_context"):
+            logger.info("[ChatAgent] 컨텍스트가 이미 존재 (스킵)")
+            return {}
+    
+        # 컨텍스트가 없으면 에러 (API에서 주입해야 함)
+        logger.warning("[ChatAgent] 컨텍스트 미제공")
+        return {
+            "accident_context": "사고 상황 정보 없음",
+            "vision_summary": "이미지 분석 정보 없음",
+            "initial_rag": "초기 판례 정보 없음",
+            "fault_analysis": "과실 비율 정보 없음"
+        }
+
+    async def search_additional_node(self, state: ChatState) -> dict:
+        """
+        [Node 2] 추가 질문에 대한 RAG 재검색
+        - 사용자 질문 + 사고 상황을 조합하여 검색
+        """
+        try:
+            pass
+        except Exception as e:
+            pass
+
+    async def generate_response_node(self, state: ChatState) -> dict:
+        """
+        [Node 3] 최종 응답 생성
+        - 모든 컨텍스트를 종합하여 답변
+        """
+
+        try:
+            pass
+        except Exception as e:
+            pass
+
+    async def run(self, initial_state: dict, config: dict = None) -> dict:
+        """그래프 실행 헬퍼"""
+        pass
+
+    async def stream_response(self, initial_state: dict, config: dict = None)
+        """
+        [스트리밍 응답 생성]
+        실시간으로 응답을 반환하여 사용자 경험 향상
+        """
+        pass
+    
+# 전역 인스턴스 생성
 agent_instance = AccidentGraphAgent()
+chat_agent_instance = AccidentChatAgent()
     
