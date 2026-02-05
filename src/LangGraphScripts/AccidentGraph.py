@@ -425,6 +425,11 @@ class AccidentChatAgent:
         # 워크플로우: Context 로드 -> 추가 검색 -> 응답 생성
         self.workflow.set_entry_point("load_context")
         self.workflow.add_edge("load_context", "search_additional")
+
+        # 검색 후 'generate_response' 로 이동하도록 변경
+        self.workflow.add_edge("search_additional", "generate_response")
+
+        # 응답 생성 후 종료
         self.workflow.add_edge("search_additional", END)
 
     async def setup(self):
@@ -484,9 +489,37 @@ class AccidentChatAgent:
         - 사용자 질문 + 사고 상황을 조합하여 검색
         """
         try:
-            pass
+            # 가장 최근 사용자 질문 추출
+            last_human_msg = next(
+                (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+                None
+            )
+
+            if not last_human_msg:
+                return {"additional_rag": "검색할 질문이 없습니다."}
+            
+            user_question = last_human_msg.content
+
+            # [핵심] 사고 상황 + 질문을 조합하여 검색 정확도 향상
+            combined_query = f"""
+            [사고 상황]
+            {state.get("accident_context", '')}
+
+            [사용자 질문]
+            {user_question}            
+            """
+
+            logger.info(f"[ChatAgent] 추가 검색 시작: {user_question[:50]}...")
+
+            # RAG 검색 실행
+            additional_docs = await self.engine.search_legal_docs(combined_query)
+
+            logger.info("[ChatAgent] 추가 검색 완료")
+            return {"additional_rag": additional_docs}
+
         except Exception as e:
-            pass
+            logger.error(f"[ChatAgent] 추가 검색 오류")
+            return {"additional_rag": "추가 검색 중 오류 발생"}
 
     async def generate_response_node(self, state: ChatState) -> dict:
         """
@@ -495,20 +528,77 @@ class AccidentChatAgent:
         """
 
         try:
-            pass
+            # 시스템 프롬프트 구성
+            system_prompt = f"""
+            당신은 교통사고 법률 상담 전문가입니다.
+            다음 정보를 바탕으로 사용자의 질문에 정확하고 친절하게 답변하세요.
+
+            [사고 상황 요약]
+            {state.get('accident_context', '정보 없음')}
+            
+            [현장 이미지 분석 결과]
+            {state.get('vision_summary'), '정보 없음'}
+
+            [초기 과실 비율 판단]
+            {state.get('fault_analysis', '정보 없음')}
+
+            [초기 참조 판례]
+            {state.get('initial_rag', '정보 없음')}
+
+            [추가 검색된 관련 판례]
+            {state.get('additional_rag'), '정보 없음'}
+
+            [답변 지침]
+            1. 사용자의 질문에 직접적으로 답변하세요.
+            2. 위 컨텍스트 정보를 근거로 활용하되, 자연스럽게 녹여서 설명하세요.
+            3. 법률 용어는 쉽게 풀어서 설명하세요.
+            4. 필요시 추가 질문을 유도하세요.
+            5. 답변은 3-5 문단으로 구성하세요.
+            """
+
+            # 메시지 구성
+            messages = [
+                SystemMessage(content=system_prompt)
+            ] + state["messages"]
+
+            # LLM 호출 (gpt-4o-mini 사용 - 챗봇은 비용 효율적으로)
+            response = await self.engine.llm_fast.ainvoke(messages)
+
+            logger.info("[ChatAgent] 응답 생성 완료")
+
+            return {
+                "response": response.content,
+                "messages": [AIMessage(content=response.content)]
+            }
+
         except Exception as e:
-            pass
+            logger.error(f"[ChatAgent] 응답 생성 오류: {e}")
+            fallback_response = "죄송합니다. 일시적인 오류가 발생했습니다. 질문을 다시 입력해주세요."
+            return {
+                "response": fallback_response,
+                "messages": [AIMessage(content=fallback_response)]
+            }
 
     async def run(self, initial_state: dict, config: dict = None) -> dict:
         """그래프 실행 헬퍼"""
-        pass
+        if config is None:
+            config = {}
+        return await self.graph_app.ainvoke(initial_state, config=config)
 
-    async def stream_response(self, initial_state: dict, config: dict = None)
+    async def stream_response(self, initial_state: dict, config: dict = None):
         """
         [스트리밍 응답 생성]
         실시간으로 응답을 반환하여 사용자 경험 향상
         """
-        pass
+        if config is None:
+            config = {}
+
+        # 스트리밍 실행
+        async for event in self.graph_app.astream(initial_state, config=config):
+            # 각 노드의 출력을 yield
+            for node_name, node_output in event.items():
+                if node_name == "generate_response" and "response" in node_output:
+                    yield node_output["response"]
     
 # 전역 인스턴스 생성
 agent_instance = AccidentGraphAgent()
