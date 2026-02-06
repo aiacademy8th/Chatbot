@@ -3,14 +3,14 @@ import base64
 import asyncio
 import logging
 from io import BytesIO
-from typing import List, Optional, Literal          # Literal 추가
+from typing import List, Optional, Literal, Dict, Any
 from PIL import Image
 from dotenv import load_dotenv
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_postgres import PGVector
 from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from pydantic import BaseModel, Field       # 구조화된 출력을 위한 라이브러리
 
 # 로깅 설정
@@ -33,12 +33,22 @@ class AccidentAnalysisResult(BaseModel):
         description="과실 비율과 사고 상황에 따른 최적의 해결 방안"
     )
 
+# --- [Query Expanson용 데이터 모델] ---
+class ExpandedQuery(BaseModel):
+    """쿼리 확장 결과"""
+    legal_terms: List[str] = Field(description="법률 용어로 변환된 키워드 (예: 좌회전 -> 회전교차로 진입)")
+    accident_type: str = Field(description="사고 유형 분류 (교차로/차선변경/후방추돌/주차장/기타)")
+    key_factors: List[str] = Field(description="과실 판단 핵심 요소 (신호위반/중앙선침범/안전거리마확보 등)")
+    expanded_query: str = Field(description="검색 최적화된 재구성 쿼리")
+    metadata_filters: Dict[str, Any] = Field(description="메타데이터 필터링 조건")
+
 # --- RAG 엔진 클래스
 class AccidentRAGEngine:
     # 클래스 수준에서 리소스 관리 (싱글톤 변수들)
     _engine = None
     _vector_store = None
     _embeddings = None      # 임베딩 인스턴스 추가
+    _reranker = None        # Reranker 인스턴스
 
     def __init__(self):
         load_dotenv()
@@ -52,6 +62,9 @@ class AccidentRAGEngine:
 
         # 2. 고성능 모델: 비전 분석, 최종 법률 판단용
         self.llm_smart = ChatOpenAI(model="gpt-4o", temperature=0)
+
+        # 3. Query Expansion 전용 모델 (구조화된 출력)
+        self.llm_expander = self.llm_fast.with_structured_output(ExpandedQuery)
 
     def _get_embeddings(self):
         """OpenAIEmbeddings 싱글톤 인스턴스 반환"""
@@ -95,6 +108,34 @@ class AccidentRAGEngine:
         
         return AccidentRAGEngine._vector_store
     
+    def _get_reranker(self):
+        """
+        Reranker 초기화 (Cohere 또는 CrossEncoder)
+        [옵션 1] Cohere API 사용 (품질 우수)
+        [옵션 2] SentenceTransformer (로컬 - 비용 절감)
+        """
+        if AccidentRAGEngine._reranker is None:
+            try:
+                # 옵션 1: Cohere 사용 (API 키 필요)
+                cohere_api_key = os.getenv("COHERE_API_KEY")
+                if cohere_api_key:
+                    import cohere
+                    AccidentRAGEngine._reranker = cohere.Client(cohere_api_key)
+                    logger.info("Cohere Reranker 초기화 완료")
+                else:
+                    # 옵션 2: CrossEncoder 사용 (로컬)
+                    from sentence_transformers import CrossEncoder
+                    AccidentRAGEngine._reranker = CrossEncoder(
+                        'cross-encoder/ms-marco-MiniLM-L-6-v2',
+                        max_length=512
+                    )
+                    logger.info("CrossEncoder Reranker 초기화 완료 (로컬)")
+            except Exception as e:
+                logger.warning(f"Reranker 초기화 실패: {e}. Reranking 스킵됩니다.")
+                AccidentRAGEngine._reranker = None
+        
+        return AccidentRAGEngine._reranker
+    
     def _encode_image(self, image_path: str) -> str:
         """
         이미지 경로를 받아 리사이징 및 압축 후 Base64 문자열 반환
@@ -118,6 +159,180 @@ class AccidentRAGEngine:
             logger.warning(f"이미지 인코딩 실패 ({image_path}): {e}")
             return ""
         
+    # --- [HIGH PRIORITY 1] Query Expansion ---
+    async def _expand_query(self, original_query: str) -> ExpandedQuery:
+        """
+        사용자 쿼리를 법률 용어와 메타데이터 필터로 확장
+
+        Args: 
+            original_query: 원본 사용자 질문
+        
+        Returns:
+            ExpandedQuery: 확장된 쿼리 정보
+        """
+        
+        expansion_prompt = f"""
+        당신은 교통사고 법률 전문가입니다. 사용자의 질문을 분석하여 다음을 추출하세요:
+
+        [원본 질문]
+        {original_query}
+
+        [작업 지침]
+        1. legal_terms: 법률 데이터베이스 검색에 최적화된 용어로 변환
+            예: "좌회전하다가" -> ["좌회전 진행", "교차로 진입", "회전 중 충돌"]
+        
+        2. accident_type: 다음 중 하나로 분류
+            - 교차로 (신호/비신호 교차로 사고)
+            - 차선변경 (끼어들기, 합류 사고)
+            - 후방추돌 (정차/서행 중 추돌)
+            - 주차장 (주차 중 접촉 사고)
+            - 기타 (위 분류에 해당 없음)
+
+        3. key_factors: 과실 판단 핵심 요소 추출
+            예: ["신호위반", "안전거리 미확보", "방향지시등 미점등", "중앙선 침범"]
+
+        4. expanded_query: 검색 최적화 쿼리 (법률 용어 + 핵심 상황 조합)
+            예: "신호대기 중인 차량에 우회전 차량이 충돌한 교ㅏ고 사고의 과실 비율"
+
+        5. metadata_filters: 검색 필터 조건 (JSON 형태)
+            예: {{"accident_type": "교차로", "has_signal": true}}
+
+        [중요] 질문에서 명시되지 않은 정보는 추측하지 말고 빈 값으로 남겨두세요
+        """
+
+        try:
+            expansion_msg = HumanMessage(content=expansion_prompt)
+            expanded = await self.llm_expander.ainvoke([expansion_msg])
+
+            logger.info(f"[Query Expansion] {original_query[:30]}... -> {expanded.accident_type}")
+
+            return expanded
+        except Exception as e:
+            logger.error(f"Query Expansion 실패: {e}")
+            # Fallback: 원본 쿼리 그대로 사용
+            return ExpandedQuery(
+                legal_terms=[original_query],
+                accident_type="기타",
+                key_factors=[],
+                expanded_query=original_query,
+                metadata_filters={}
+            )
+        
+    # --- [HIGH PRIORITY 2] Metadata Filtering ---
+    async def _search_with_metadata_filter(
+        self,
+        query: str,
+        metadata_filters: Dict[str, Any],
+        k: int = 10     # 1차 검색은 더 많이 (Reranking 대비)
+    ) -> List[tuple]:
+        """
+        메타데이터 필터를 적용한 유사도 검색
+
+        Args:
+            query: 검색 쿼리
+            metadata_filters: 필터 조건 (예: {"accident_type": "교차로"})
+            k: 반환한 문서 수
+        Returns:
+            (Document, score) 튜플 리스트
+        """
+        try:
+            # PGVector는 filter 파라미터를 지원 (딕셔너리 형태)
+            if metadata_filters:
+                docs_with_scores = await asyncio.to_thread(
+                    self.vector_store.similarity_search_with_score,
+                    query,
+                    k=k,
+                    filter=metadata_filters     # 메타데이터 필터 적용
+                )
+                logger.info(f"[Metadata Filter] 조건: {metadata_filters}, 결과: {len(docs_with_scores)}개")
+            else:
+                # 필터 없으면 기본 검색
+                docs_with_scores = await asyncio.to_thread(
+                    self.vector_store.similarity_search_with_score,
+                    query,
+                    k=k
+                )
+
+            return docs_with_scores
+        
+        except Exception as e:
+            logger.error(f"메타데이터 필터링 검색 실패: {e}")
+            # Fallback: 필터 없이 검색
+            return await asyncio.to_thread(
+                self.vector_store.similarity_search_with_score,
+                query,
+                k=k
+            )
+    
+    # --- [HIGH PRIORITY 3] Reranking ---
+    async def _rerank_documents(
+        self,
+        query: str,
+        docs_with_scores: List[tuple],
+        top_k: int = 3
+    ) -> List[tuple]:
+        """
+        CrossEncoder 또는 Cohere를 사용한 재순위화
+
+        Args:
+            query: 검색 쿼리
+            docs_with_scores: (Document, score) 리스트
+            top_k: 최종 반환할 문서 수
+
+        Returns:
+            재순위화된 상위 문서 리스트
+        """
+        reranker = self._get_reranker()
+
+        if not reranker or not docs_with_scores:
+            # Reranker 없으면 원본 그대로 반환
+            return docs_with_scores[:top_k]
+        
+        try:
+            # Cohere API 사용
+            if hasattr(reranker, "rerank"):
+                documents = [doc.page_content for doc, _ in docs_with_scores]
+                rerank_response = await asyncio.to_thread(
+                    reranker.rerank,
+                    query=query,
+                    documents=documents,
+                    top_n=top_k,
+                    model="rerank-multilingual-v3.0"
+                )
+
+                # Cohere 결과를 원본 문서와 매핑
+                reranked = []
+                for result in rerank_response.results:
+                    idx = result.index
+                    reranked.append((
+                        docs_with_scores[idx][0],       # Document
+                        result.relevance_score          # Rerank score
+                    ))
+                
+                logger.info(f"[Cohere Rerank] {len(docs_with_scores)}개 -> {len(reranked)}개")
+                return reranked
+            # CrossEncoder 사용 (로컬)
+            else:
+                pairs = [(query, doc.page_content) for doc, _ in docs_with_scores]
+                scores = await asyncio.to_thread(reranker.predict, pairs)
+
+                # 점수 기준 재정렬
+                reranked = sorted(
+                    zip(docs_with_scores, scores),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+
+                # 상위 top_k개 반환
+                result = [(doc, score) for (doc, _), score in reranked[:top_k]]
+
+                logger.info(f"[CrossEncoder Rerank] {len(docs_with_scores)}개 -> {len(result)}개")
+                return result
+
+        except Exception as e:
+            logger.error(f"Reranking 실패: {e}")
+            return docs_with_scores[:top_k]
+
     # --- [Tool 1] 이미지 분석 (Vision Worker용) ---
     async def analyze_images_from_paths(self, image_paths: list) -> str:
         """이미지 파일들을 분석하여 객관적인 상황 묘사 텍스트 반환"""
@@ -139,7 +354,7 @@ class AccidentRAGEngine:
             """
         }]
 
-        # [개선] 이미지 인코딩 병렬 처리
+        # 이미지 인코딩 병렬 처리
         async def encode_async(path):
             return await asyncio.to_thread(self._encode_image, path)
         
@@ -169,23 +384,53 @@ class AccidentRAGEngine:
     
     # --- [Tool 2] 법률 검색 (Search Worker용) - [기능 추가: 3줄 요약] ---
     async def search_legal_docs(self, query: str) -> str:
-        """쿼리와 유사한 판례 검색 (비동기 처리)"""
+        """
+        쿼리와 유사한 판례 검색 (Query Expansion + Metadata Filtering + Reranking 적용)
 
-        # [최적화] DB I/O 바운드 작업이므로 별도 스레드에서 실행
+        Args:
+            query: 원본 사용자 질문
+
+        Returns:
+            요약된 판례 정보 (3줄) 
+        """
+
         try:
-            # 1. 검색 수행
-            docs_with_scores = await asyncio.to_thread(
-                self.vector_store.similarity_search_with_score, query, k=3
+            # STEP 1: Query Expansion
+            expanded = await self._expand_query(query)
+            search_query = expanded.expanded_query
+
+            logger.info(f"[검색 시작] 원본: {query[:50]}...")
+            logger.info(f"[확장 쿼리] {search_query}")
+
+            # STEP 2: Metadata Filtering 검색 (1차: k=10)
+            docs_with_scores = await self._search_with_metadata_filter(
+                query=search_query,
+                metadata_filters=expanded.metadata_filters,
+                k=10        # Reranking을 위해 더 많이 검색
             )
 
             if not docs_with_scores:
                 return "검색된 관련 판례가 없습니다."
-            
+
+            # STEP 3: Reranking (10개 -> 3개)
+            reranked_docs  =await self._rerank_documents(
+                query=search_query,
+                docs_with_scores=docs_with_scores,
+                top_k=3
+            )
+
+            # STEP 4: 결과 포맷팅
             raw_results = []
-            for i, (doc, _) in enumerate(docs_with_scores):
+            for i, (doc, score) in enumerate(reranked_docs):
                 src = doc.metadata.get("source", "판례 DB")
+                accident_type = doc.metadata.get("accident_type", "")
                 content = doc.page_content.replace("\n", " ").strip()[:500]
-                raw_results.append(f"사례 {i + 1} ({src}): {content}")
+
+                # 메타데이터 정보 추가
+                meta_info = f"[{accident_type}]" if accident_type else ""
+                raw_results.append(
+                    f"사례 {i + 1} {meta_info} (관련도: {score:.2f}, 출처: {src}): {content}"
+                )
 
             # 2. 프롬프트 수정 개별 나열 -> 종합 3줄 요약
             summary_prompt = f"""
@@ -196,6 +441,7 @@ class AccidentRAGEngine:
             1. '사례 1은..., 사례 2는...' 식의 나열을 금지합니다.
             2. "주요 판례에 따르면~" 과 같이 하나의 문맥으로 통합하세요.
             3. 과실 비율이 달라지는 핵심 변수(속도, 신호, 진입 시점 등)가 무엇인지 포함하세요.
+            4. 검색된 사례의 사고 유형({expanded.accident_type})을 고려하세요.
 
             [검색된 판례 목록]:
             {chr(10).join(raw_results)}
@@ -204,6 +450,7 @@ class AccidentRAGEngine:
             summary_msg = HumanMessage(content=summary_prompt)
             summary_response = await self.llm_fast.ainvoke([summary_msg])
 
+            logger.info("[검색 완료] 요약 생성 완료")
             return summary_response.content
         
         except Exception as e:
