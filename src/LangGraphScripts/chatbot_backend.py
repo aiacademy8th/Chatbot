@@ -12,6 +12,7 @@ from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
+from datetime import datetime
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -352,11 +353,18 @@ async def get_chat_history(thread_id: str):
 @app.get("/health")
 async def health_check():
     """서버 상태 확인"""
+    from RAG.AccidentRAGEngine import AccidentRAGEngine
+    engine = AccidentRAGEngine()
+
     return {
         "status": "healthy",
-        "agent": {
+        "timestamp": datetime.now().isoformat(),
+        "services": {
             "analyze_agent": agent_instance.graph_app is not None,
             "chat_agent": chat_agent_instance.graph_app is not None
+        },
+        "database": {
+            "rag-pool": engine.get_pool_status()
         }
     }
 

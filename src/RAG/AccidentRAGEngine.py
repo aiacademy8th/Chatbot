@@ -13,6 +13,14 @@ from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
 from sqlalchemy import create_engine, text
 from pydantic import BaseModel, Field       # 구조화된 출력을 위한 라이브러리
 
+# 재시도 로직을 위함 tenacity
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type
+)
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,16 +42,34 @@ class AccidentAnalysisResult(BaseModel):
     )
 
 # --- [Query Expanson용 데이터 모델] ---
+class MetadataFilters(BaseModel):
+    accident_type: Optional[str] = Field(None, description="사고 유형")
+    has_signal: Optional[bool] = Field(None, description="신호등 유무")
+    # 필요한 필드를 미리 정의
+
 class ExpandedQuery(BaseModel):
     """쿼리 확장 결과"""
     legal_terms: List[str] = Field(description="법률 용어로 변환된 키워드 (예: 좌회전 -> 회전교차로 진입)")
     accident_type: str = Field(description="사고 유형 분류 (교차로/차선변경/후방추돌/주차장/기타)")
-    key_factors: List[str] = Field(description="과실 판단 핵심 요소 (신호위반/중앙선침범/안전거리마확보 등)")
+    key_factors: List[str] = Field(description="과실 판단 핵심 요소 (신호위반/중앙선침범/안전거리미확보 등)")
     expanded_query: str = Field(description="검색 최적화된 재구성 쿼리")
-    metadata_filters: Dict[str, Any] = Field(description="메타데이터 필터링 조건")
+    metadata_filters: MetadataFilters = Field(description="메타데이터 필터링 조건")
 
 # --- RAG 엔진 클래스
 class AccidentRAGEngine:
+    """
+    교통사고 RAG 엔진
+    [적용된 사항]
+    1. Query Expansion (쿼리 확장)
+    2. Metadata Filtering (메타데이터 필터링)
+    3. Reranking (재순위화)
+    4. 비동기 처리 최적화 (Cohere 블로킹 제거)
+    5. 에러 핸들링 강화
+    6. 재시도 로직 (tenacity)
+    7. 타임아웃 설정 (모든 외부 호출)
+    8. Connection Pool 모니터링
+    """
+
     # 클래스 수준에서 리소스 관리 (싱글톤 변수들)
     _engine = None
     _vector_store = None
@@ -64,7 +90,10 @@ class AccidentRAGEngine:
         self.llm_smart = ChatOpenAI(model="gpt-4o", temperature=0)
 
         # 3. Query Expansion 전용 모델 (구조화된 출력)
-        self.llm_expander = self.llm_fast.with_structured_output(ExpandedQuery)
+        self.llm_expander = self.llm_fast.with_structured_output(
+            ExpandedQuery,
+            method="function_calling"
+        )
 
     def _get_embeddings(self):
         """OpenAIEmbeddings 싱글톤 인스턴스 반환"""
@@ -93,7 +122,8 @@ class AccidentRAGEngine:
                     connection_string,
                     pool_size=10,           # 동시 연결 수
                     max_overflow=20,        # 추가 연결 허용
-                    pool_pre_ping=True      # 연결 상태 검증
+                    pool_pre_ping=True,     # 연결 상태 검증
+                    pool_recycle=3600       # 1시간마다 연결 재활용
                 )
                 logger.info("DB 엔진 및 커넥션 풀이 생성되었습니다.")
 
@@ -160,9 +190,14 @@ class AccidentRAGEngine:
             return ""
         
     # --- [HIGH PRIORITY 1] Query Expansion ---
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
     async def _expand_query(self, original_query: str) -> ExpandedQuery:
         """
         사용자 쿼리를 법률 용어와 메타데이터 필터로 확장
+        쿼리 확장 (재시도 + 타임아웃)
 
         Args: 
             original_query: 원본 사용자 질문
@@ -192,7 +227,7 @@ class AccidentRAGEngine:
             예: ["신호위반", "안전거리 미확보", "방향지시등 미점등", "중앙선 침범"]
 
         4. expanded_query: 검색 최적화 쿼리 (법률 용어 + 핵심 상황 조합)
-            예: "신호대기 중인 차량에 우회전 차량이 충돌한 교ㅏ고 사고의 과실 비율"
+            예: "신호대기 중인 차량에 우회전 차량이 충돌한 교차로 사고의 과실 비율"
 
         5. metadata_filters: 검색 필터 조건 (JSON 형태)
             예: {{"accident_type": "교차로", "has_signal": true}}
@@ -202,11 +237,17 @@ class AccidentRAGEngine:
 
         try:
             expansion_msg = HumanMessage(content=expansion_prompt)
-            expanded = await self.llm_expander.ainvoke([expansion_msg])
+            expanded = await asyncio.wait_for(
+                self.llm_expander.ainvoke([expansion_msg]),
+                timeout=10.0
+            )
 
             logger.info(f"[Query Expansion] {original_query[:30]}... -> {expanded.accident_type}")
 
             return expanded
+        except asyncio.TimeoutError:
+            logger.error(f"Query Expansion 타임아웃")
+            raise
         except Exception as e:
             logger.error(f"Query Expansion 실패: {e}")
             # Fallback: 원본 쿼리 그대로 사용
@@ -226,7 +267,7 @@ class AccidentRAGEngine:
         k: int = 10     # 1차 검색은 더 많이 (Reranking 대비)
     ) -> List[tuple]:
         """
-        메타데이터 필터를 적용한 유사도 검색
+        메타데이터 필터를 적용한 유사도 검색 (재시도 + 타임아웃)
 
         Args:
             query: 검색 쿼리
@@ -236,33 +277,59 @@ class AccidentRAGEngine:
             (Document, score) 튜플 리스트
         """
         try:
-            # PGVector는 filter 파라미터를 지원 (딕셔너리 형태)
             if metadata_filters:
-                docs_with_scores = await asyncio.to_thread(
-                    self.vector_store.similarity_search_with_score,
-                    query,
-                    k=k,
-                    filter=metadata_filters     # 메타데이터 필터 적용
+                docs_with_scores = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.vector_store.similarity_search_with_score,
+                        query,
+                        k=k,
+                        filter=metadata_filters
+                    ),
+                    timeout=15.0
                 )
-                logger.info(f"[Metadata Filter] 조건: {metadata_filters}, 결과: {len(docs_with_scores)}개")
+
+                # 결과가 0이면 필터 끄고 재검색!
+                if not docs_with_scores:
+                    logger.warning(f"[Metadata Filter] 결과 0개 -> 필터 해제 후 재검색 시도")
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.vector_store.similarity_search_with_score,
+                            query,
+                            k=k
+                        ),
+                        timeout=15.0
+                    )
+
+                logger.info(f"[Metadata Filter] {metadata_filters}, 결과: {len(docs_with_scores)}개")
             else:
                 # 필터 없으면 기본 검색
-                docs_with_scores = await asyncio.to_thread(
+                docs_with_scores = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.vector_store.similarity_search_with_score,
+                        query,
+                        k=k
+                    ),
+                    timeout=15.0
+                )
+                logger.info(f"[Basic Search] 결과: {len(docs_with_scores)}개")
+
+            return docs_with_scores
+        
+        except asyncio.TimeoutError:
+            logger.error(f"DB 검색 타임아웃")
+            raise
+        except Exception as e:
+            logger.error(f"DB 검색 실패: {e}")
+            
+            if metadata_filters:
+                logger.info(" -> 필터 없이 재시도...")
+                return await asyncio.to_thread(
                     self.vector_store.similarity_search_with_score,
                     query,
                     k=k
                 )
-
-            return docs_with_scores
-        
-        except Exception as e:
-            logger.error(f"메타데이터 필터링 검색 실패: {e}")
-            # Fallback: 필터 없이 검색
-            return await asyncio.to_thread(
-                self.vector_store.similarity_search_with_score,
-                query,
-                k=k
-            )
+            
+            raise
     
     # --- [HIGH PRIORITY 3] Reranking ---
     async def _rerank_documents(
@@ -272,7 +339,7 @@ class AccidentRAGEngine:
         top_k: int = 3
     ) -> List[tuple]:
         """
-        CrossEncoder 또는 Cohere를 사용한 재순위화
+        CrossEncoder 또는 Cohere를 사용한 재순위화 (Cohere 비동기 처리 적용)
 
         Args:
             query: 검색 쿼리
@@ -292,14 +359,19 @@ class AccidentRAGEngine:
             # Cohere API 사용
             if hasattr(reranker, "rerank"):
                 documents = [doc.page_content for doc, _ in docs_with_scores]
-                rerank_response = await asyncio.to_thread(
-                    reranker.rerank,
-                    query=query,
-                    documents=documents,
-                    top_n=top_k,
-                    model="rerank-multilingual-v3.0"
-                )
 
+                # 비동기 처리 (블로킹 제거)
+                rerank_response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        reranker.rerank,
+                        query=query,
+                        documents=documents,
+                        top_n=top_k,
+                        model="rerank-multilingual-v3.0"
+                    ),
+                    timeout=10.0
+                )
+                
                 # Cohere 결과를 원본 문서와 매핑
                 reranked = []
                 for result in rerank_response.results:
@@ -314,8 +386,11 @@ class AccidentRAGEngine:
             # CrossEncoder 사용 (로컬)
             else:
                 pairs = [(query, doc.page_content) for doc, _ in docs_with_scores]
-                scores = await asyncio.to_thread(reranker.predict, pairs)
-
+                scores = await asyncio.wait_for(
+                    asyncio.to_thread(reranker.predict, pairs),
+                    timeout=5.0
+                )
+                
                 # 점수 기준 재정렬
                 reranked = sorted(
                     zip(docs_with_scores, scores),
@@ -329,6 +404,9 @@ class AccidentRAGEngine:
                 logger.info(f"[CrossEncoder Rerank] {len(docs_with_scores)}개 -> {len(result)}개")
                 return result
 
+        except asyncio.TimeoutError:
+            logger.error(f"Reranking 타임아웃")
+            return docs_with_scores[:top_k]
         except Exception as e:
             logger.error(f"Reranking 실패: {e}")
             return docs_with_scores[:top_k]
@@ -376,8 +454,16 @@ class AccidentRAGEngine:
 
         # [속도 최적화] max_tokens 제한으로 빠른 답변 유도 (상세 묘사를 위해 700개 지정)
         try:
-            response = await self.llm_smart.ainvoke([msg], config={"max_tokens": 700})
+            response = await asyncio.wait_for(
+                self.llm_smart.ainvoke([msg], config={"max_tokens": 700}),
+                timeout=30.0
+            )
+            
+            logger.info(f"[Vision] {valid_images}개 이미지 분석 완료")
             return response.content
+        except asyncio.TimeoutError:
+            logger.error(f"이미지 분석 타임아웃")
+            return "이미지 분석 시간 초과"
         except Exception as e:
             logger.error(f"이미지 분석 API 호출 실패: {e}")
             return f"이미지 분석 중 오류 발생: {str(e)}"
@@ -405,7 +491,7 @@ class AccidentRAGEngine:
             # STEP 2: Metadata Filtering 검색 (1차: k=10)
             docs_with_scores = await self._search_with_metadata_filter(
                 query=search_query,
-                metadata_filters=expanded.metadata_filters,
+                metadata_filters=expanded.metadata_filters.model_dump(exclude_none=True),
                 k=10        # Reranking을 위해 더 많이 검색
             )
 
@@ -448,11 +534,18 @@ class AccidentRAGEngine:
             """
 
             summary_msg = HumanMessage(content=summary_prompt)
-            summary_response = await self.llm_fast.ainvoke([summary_msg])
+
+            summary_response = await asyncio.wait_for(
+                self.llm_fast.ainvoke([summary_msg]),
+                timeout=15.0
+            )
 
             logger.info("[검색 완료] 요약 생성 완료")
             return summary_response.content
         
+        except asyncio.TimeoutError:
+            logger.error("법률 검색 타임아웃")
+            return "검색 시간 초과"
         except Exception as e:
             logger.error(f"판례 검색 중 오류: {e}")
             return f"판례 검색 중 시스템 오류 발생: {str(e)}"
@@ -462,6 +555,7 @@ class AccidentRAGEngine:
         """
         대화 기록 (Context)과 텍스트 요약본을 종합하여 최종 답변 생성
         [비용 절감] 이미지는 여기서 사용하지 않고 텍스트만 처리함
+        최종 분석 (타임아웃 + 에러 핸들링)
         """
 
         # 1. 구조화된 출력을 위한 LLM 설정
@@ -528,8 +622,23 @@ class AccidentRAGEngine:
 
         # 6. 실행 및 결과 반환
         try:
-            response = await structured_llm.ainvoke(final_messages)
+            response = await asyncio.wait_for(
+                structured_llm.ainvoke(final_messages),
+                timeout=20.0
+            )
+            
+            logger.info("[Final Solution] 분석 완료")
             return response
+        except asyncio.TimeoutError:
+            logger.error("최종 분석 타임아웃")
+            return AccidentAnalysisResult(
+                summary="분석 시간 초과",
+                fault_ratio=FaultRatio(me=0, opponent=0),
+                legal_basis=[],
+                advice="시스템 지연 중입니다. 잠시 후 재시도하세요.",
+                reasoning="타임아웃",
+                action_guide="보험 처리 권장"
+            )
         except Exception as e:
             # 실패 시 기본값 반환 (Fallback)
             logger.error(f"구조화된 출력 생성 실패: {e}")
@@ -537,7 +646,20 @@ class AccidentRAGEngine:
                 summary="분석 중 오류가 발생했습니다.",
                 fault_ratio=FaultRatio(me=0, opponent=0),
                 legal_basis=[],
-                advice="일시적인 오류가 발생습니다. 잠시후 다시 시도해 주세요.",
+                advice="일시적인 오류가 발생했습니다. 잠시후 다시 시도해 주세요.",
                 reasoning=str(e),
                 action_guide="보험 처리 권장"
             )
+        
+    # --- [유틸리티] Pool 상태 ---
+    def get_pool_status(self) -> Dict[str, Any]:
+        """Connection Pool 상태"""
+        if AccidentRAGEngine._engine:
+            pool = AccidentRAGEngine._engine.pool
+            return {
+                "size": pool.size(),
+                "checked": pool.checkedout(),
+                "overflow": pool.overflow()
+            }
+        
+        return {"error": "Engine not initialized"}
