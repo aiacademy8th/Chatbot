@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'chat.dart';
+import 'dart:typed_data';
 
 class PhotoScreen extends StatefulWidget {
   const PhotoScreen({super.key});
@@ -54,22 +55,24 @@ class _PhotoScreenState extends State<PhotoScreen> {
   // 이미지 선택
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: source,
+      // 1. pickImage 대신 pickMultiImage 사용
+      final List<XFile> images = await _picker.pickMultiImage(
         maxWidth: 1920,
         maxHeight: 1080,
         imageQuality: 85,
       );
 
-      if (image != null) {
+      if (images.isNotEmpty) {
         setState(() {
-          _selectedImages.add(image);
+          // 2. 선택된 모든 이미지를 리스트에 추가
+          _selectedImages.addAll(images);
         });
         
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('사진이 추가되었습니다'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            // 3. 몇 장이 추가되었는지 메시지 표시
+            content: Text('${images.length}장의 사진이 추가되었습니다'),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -226,11 +229,21 @@ class _PhotoScreenState extends State<PhotoScreen> {
                           children: [
                             ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                File(_selectedImages[index].path),
-                                width: 120,
-                                height: 120,
-                                fit: BoxFit.cover,
+                              child: FutureBuilder<Uint8List>(
+                                future: _selectedImages[index].readAsBytes(),
+                                builder: (context, snapshot) {
+                                  if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                                    return Image.memory(
+                                      snapshot.data!,
+                                      width: 120,
+                                      height: 120,
+                                      fit: BoxFit.cover,
+                                    );
+                                  }
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
+                                },
                               ),
                             ),
                             Positioned(
@@ -274,9 +287,7 @@ class _PhotoScreenState extends State<PhotoScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (context) => ChatbotScreen(
-                            accidentPhotos: _selectedImages
-                              .map((xfile) => File(xfile.path))
-                              .toList(),
+                            accidentPhotos: _selectedImages,
                           ),
                         ),
                       );

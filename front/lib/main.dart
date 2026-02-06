@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 import 'insurer.dart';
 import 'photo.dart';
 import 'chat.dart';
@@ -268,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       context,
                       MaterialPageRoute(
                         builder: (context) => ChatbotScreen(
-                          accidentPhotos: [],
+                          accidentPhotos: const <XFile>[],
                         ),
                       ),
                     );

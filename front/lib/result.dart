@@ -23,15 +23,10 @@ class ResultScreen extends StatelessWidget {
     return DateTime.now().microsecond % 1000000 + 1;
   }
 
-  // 과실 비율에서 숫자 추출
-  int _extractFaultPercentage(String text) {
-    // "30:70" 형식에서 상대 과실(두 번째 숫자) 추출
-    final regex = RegExp(r'(\d+)\s*:\s*(\d+)');
-    final match = regex.firstMatch(text);
-    if (match != null) {
-      return int.parse(match.group(2)!);  // 상대 과실
-    }
-    return 50;  // 기본값
+  // 과실 비율 Map에서 상대방 과실 숫자 추출
+  int _extractFaultPercentage(Map<String, dynamic> ratioMap) {
+    // "opponent" 키의 값을 정수로 반환, 없으면 50
+    return ratioMap['opponent'] as int? ?? 50;
   }
 
   // 추천 액션 결정
@@ -63,8 +58,9 @@ class ResultScreen extends StatelessWidget {
   Future<void> _generatePDF(BuildContext context) async {
     final fontData = await rootBundle.load('assets/fonts/NotoSansKR-Regular.ttf');
     final ttf = pw.Font.ttf(fontData);
+    final pdfTheme = pw.ThemeData.withFont(base: ttf);
     
-    final pdf = pw.Document();
+    final pdf = pw.Document(theme: pdfTheme);
 
     pdf.addPage(
       pw.MultiPage(
@@ -80,7 +76,6 @@ class ResultScreen extends StatelessWidget {
                 style: pw.TextStyle(
                   fontSize: 24, 
                   fontWeight: pw.FontWeight.bold,
-                  font: ttf
                 ),
               ),
             ),
@@ -89,7 +84,7 @@ class ResultScreen extends StatelessWidget {
             // 분석 일시
             pw.Text(
               '분석 일시: ${DateTime.now().toString().substring(0, 19)}',
-              style: pw.TextStyle(fontSize: 12, color: PdfColors.grey700, font: ttf),
+              style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
             ),
             pw.SizedBox(height: 30),
 
@@ -105,7 +100,7 @@ class ResultScreen extends StatelessWidget {
                     pw.SizedBox(
                       width: 150,
                       child: pw.Text('${entry.key}:', 
-                        style: pw.TextStyle(font: ttf, fontWeight: pw.FontWeight.bold)),
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                     ),
                     pw.Expanded(
                       child: pw.Text('${entry.value}'),
@@ -216,7 +211,8 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final faultRatio = analysisResult['fault_ratio'] ?? '50:50';
+    // 'fault_ratio'를 Map으로 받고, null일 경우 기본값을 설정합니다.
+    final faultRatio = analysisResult['fault_ratio'] as Map<String, dynamic>? ?? {'me': 50, 'opponent': 50};
     final opponentFault = _extractFaultPercentage(faultRatio);
     final recommendedAction = _getRecommendedAction(opponentFault);
     final actionColor = _getActionColor(recommendedAction);
@@ -338,7 +334,7 @@ class ResultScreen extends StatelessWidget {
                                 const Text('나', style: TextStyle(fontSize: 16)),
                                 const SizedBox(height: 8),
                                 Text(
-                                  faultRatio.split(':')[0],
+                                  faultRatio['me'].toString(),
                                   style: const TextStyle(
                                     fontSize: 48,
                                     fontWeight: FontWeight.bold,
@@ -357,7 +353,7 @@ class ResultScreen extends StatelessWidget {
                                 const Text('상대', style: TextStyle(fontSize: 16)),
                                 const SizedBox(height: 8),
                                 Text(
-                                  faultRatio.split(':')[1],
+                                  faultRatio['opponent'].toString(),
                                   style: const TextStyle(
                                     fontSize: 48,
                                     fontWeight: FontWeight.bold,

@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'result.dart';  
-import 'dart:io';
+import 'result.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 
 bool _chatStarted = false;
 
 class ChatbotScreen extends StatefulWidget {
-  final List<File> accidentPhotos;
+  final List<XFile> accidentPhotos;
 
   const ChatbotScreen({
     super.key,
@@ -227,30 +227,38 @@ void _startChat() {
   Future<void> _analyzeWithGPT() async {
   _addBotMessage('입력하신 정보를 분석 중입니다... 🤔');
   
-  if (!mounted) return;  // ⭐ 추가
+  if (!mounted) return;
   
   setState(() {
     _isLoading = true;
   });
 
   try {
-    final prompt = _buildAnalysisPrompt();  // ⭐ 추가 (prompt 생성)
-    final response = await _callGPT(prompt);
-    
+    final prompt = _buildAnalysisPrompt();
+    final backendResponseString = await _callBackendAnalysis(prompt);
+    final analysisResultData = jsonDecode(backendResponseString) as Map<String, dynamic>;
+
     if (mounted) {
       setState(() {
-        _isLoading = false;  // ⭐ 로딩 종료
+        _isLoading = false;
       });
       
-      // ⭐ 결과 화면으로 이동
+      // 백엔드에서 받은 legal_references (List<dynamic> or null)를
+      // ResultScreen이 기대하는 List<Map<String, String>> 형태로 변환합니다.
+      final referencesList = analysisResultData['legal_basis'] as List? ?? [];
+      final formattedReferences = referencesList.map((ref) {
+        return {'source': '참고 자료', 'content': ref.toString()};
+      }).toList();
+      
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ResultScreen(
+            // 백엔드 응답 구조에 맞게 데이터를 전달합니다.
             analysisResult: {
-              'fault_ratio': _extractFaultRatio(response),
-              'analysis': response,
-              'references': _getRagReferences(),  // 나중에 구현
+              'fault_ratio': analysisResultData['fault_ratio'] as Map<String, dynamic>?,
+              'analysis': analysisResultData['reasoning'] ?? '분석 결과 없음',
+              'references': formattedReferences, // 변환된 리스트를 전달
             },
             userAnswers: _userAnswers,
           ),
@@ -258,6 +266,8 @@ void _startChat() {
       );
     }
   } catch (e) {
+    // 디버깅을 위해 오류를 콘솔에 출력
+    print('❌ [Frontend Error] Failed to process analysis response: $e');
     if (mounted) {
       setState(() {
         _isLoading = false;
@@ -323,38 +333,36 @@ List<Map<String, String>> _getRagReferences() {
     return buffer.toString();
   }
 
-  // OpenAI API 호출
-  Future<String> _callGPT(String prompt) async {
-    final url = Uri.parse('https://api.openai.com/v1/chat/completions');
-    
-    final response = await http.post(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $openaiApiKey',
-      },
-      body: jsonEncode({
-        'model': 'gpt-4o-mini',
-        'messages': [
-          {
-            'role': 'system',
-            'content': '당신은 교통사고 과실 비율 분석 전문가입니다. 한국 도로교통법을 기준으로 정확하고 상세한 분석을 제공합니다.',
-          },
-          {
-            'role': 'user',
-            'content': prompt,
-          },
-        ],
-        'max_tokens': 1000,
-        'temperature': 0.7,
-      }),
-    );
+  // 백엔드 분석 API 호출
+  Future<String> _callBackendAnalysis(String prompt) async {
+    final url = Uri.parse('http://localhost:8001/analyze');
+    final request = http.MultipartRequest('POST', url);
+
+    // 텍스트 쿼리 추가
+    request.fields['text_query'] = prompt;
+
+    // 이미지 파일 추가
+    for (var photo in widget.accidentPhotos) {
+      request.files.add(await http.MultipartFile.fromBytes(
+        'image_files',
+        await photo.readAsBytes(),
+        filename: photo.name,
+      ));
+    }
+
+    final response = await request.send();
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
-      return data['choices'][0]['message']['content'];
+      final responseBody = await response.stream.bytesToString();
+      // 디버깅을 위해 응답을 콘솔에 출력
+      print('✅ [Backend Response] Success: $responseBody');
+      final data = jsonDecode(responseBody);
+      return jsonEncode(data['result']);
     } else {
-      throw Exception('API 호출 실패: ${response.statusCode}\n${response.body}');
+      final errorBody = await response.stream.bytesToString();
+      // 디버깅을 위해 오류를 콘솔에 출력
+      print('❌ [Backend Response] Error: $errorBody');
+      throw Exception('API 호출 실패: ${response.statusCode}\n$errorBody');
     }
   }
 

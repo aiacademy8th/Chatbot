@@ -79,7 +79,7 @@ with c1:
     acc_time = st.time_input("발생 시각", datetime.now())
 with c2:
     acc_loc = st.text_input("발생 장소 (예: 강남역 사거리)")
-    bbox = st.radio("블랙박스 유무", ["예", "아니요", "불명"], horizontal=True)
+    bbox = st.radio("블랙박스 유무", ["예", "아니요"], horizontal=True)
 
 st.divider()
 
@@ -87,25 +87,17 @@ st.info("아래 항목들을 빠짐없이 선택해주세요.")
 
 # 2. 사고 장소 및 신호
 st.subheader("2. 사고 장소 및 신호")
-col2_1, col2_2 = st.columns(2)
+col2_1 = st.columns(1)
 with col2_1:
-    road_type = st.radio("사고 발생 도로 유형", ["신호등 있는 교차로", "신호등 없는 교차로", "직선 도로", "주차장", "기타"])
-with col2_2:
-    traffic_light = st.radio("신호등 상태", ["녹색(직진)", "황색", "적색", "좌회전", "기타/신호없음"])
+    road_type = st.radio("사고 발생 도로 유형", ["교차로", "직선 도로", "주차장", "기타/모름"])
 
 st.divider()
 
 # 3. 내 차량 상황
 st.subheader("3. 내 차량 상황")
-col3_1, col3_2, col3_3, col3_4 = st.columns(4)
+col3_1 = st.columns(1)
 with col3_1:
-    my_action = st.radio("사고 당시 내 행동", ["직진 중", "좌회전 중", "우회전 중", "유턴 중", "차선 변경 중", "정차 중", "후진 중"], key="my_action")
-with col3_2:
-    my_signal = st.radio("내 차 방향지시등", ["켜지 않음", "좌측 깜빡이", "우측 깜빡이", "비상등", "기타"], key="my_signal")
-with col3_3:
-    my_traffic_light = st.radio("내 주행 신호 (진입 시)", ["녹색 (정상 진입)", "황색 (딜레마 존)", "적색 (신호 위반)", "좌회전 신호", "비보호 좌회전", "우회전 전용 신호", "신호 없음"])
-with col3_4:
-    my_speed = st.radio("내 차량 속도", ["정지", "서행(20km/h 이하)", "보통(20~50km/h)", "빠름(50km/h 이상)"], key="my_speed")
+    my_action = st.radio("사고 당시 내 행동", ["직진", "좌회전", "우회전", "유턴", "정지", "후진", "주차", "기타"], key="my_action")
 
 st.divider()
 
@@ -113,19 +105,13 @@ st.divider()
 st.subheader("4. 상대 차량 상황")
 col4_1, col4_2, col4_3, col4_4 = st.columns(4)
 with col4_1:
-    opp_action = st.radio("상대 차량 행동", ["직진 중", "좌회전 중", "우회전 중", "유턴 중", "차선 변경 중", "정차 중", "후진 중", "기타/모름"])
-with col4_2:
-    opp_signal = st.radio("상대 차 방향 지시등", ["켜지 않음", "좌측 깜빡이", "우측 깜빡이", "비상등", "기타"])
-with col4_3:
-    opp_traffic_light = st.radio("상대 주행 신호 (진입 시)", ["녹색 (정상 진입)", "황색 (딜레마 존)", "적색 (신호 위반)", "좌회전 신호", "비보호 좌회전", "우회전 전용 신호", "신호 없음"])
-with col4_4:
-    opp_direction = st.radio("상대 차량 진입 방향", ["정면 (맞은 편)", "좌측에서 진입", "우측에서 진입", "후방 추돌", "기타"])
+    opp_action = st.radio("상대 차량 행동", ["직진", "좌회전", "우회전", "유턴", "정지", "후진", "주차", "기타"])
 
 st.divider()
 
 # 5. 충돌 상황
 st.subheader("5. 충돌 부위")
-hit_part = st.radio("내 차량 충돌 부위", ["전면", "전면 좌측", "전면 우측", "좌측면", "우측면", "후면", "후면 좌측", "후면 우측"], horizontal=True)
+hit_part = st.radio("내 차량 충돌 부위", ["앞면", "옆면(왼쪽)", "옆면(오른쪽)", "뒷면"], horizontal=True)
 
 st.divider()
 
@@ -133,9 +119,7 @@ st.divider()
 st.subheader("6. 추가 정황 (중복 선택 가능)")
 col6_1, col6_2 = st.columns(2)
 with col6_1:
-    my_fault = st.multiselect("내 차량 특이사항", ["과속", "신호 위반", "중앙선 침범", "안전거리 미확보", "급정거", "음주/무면허", "해당 없음"], default=["해당 없음"])
-with col6_2:
-    opp_fault = st.multiselect("상대 차량 특이사항", ["과속", "신호 위반", "중앙선 침범", "안전거리 미확보", "급정거", "음주/무면허", "해당 없음"], default=["해당 없음"])
+    my_fault = st.multiselect("내 차량 특이사항", ["과속", "신호위반", "중앙선 침범", "안전거리 미확보", "끼어들기", "음주운전", "해당없음"], default=["해당없음"])
 
 # 프롬프트 조합
 final_text_prompt = f"""
