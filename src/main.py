@@ -1,125 +1,152 @@
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
+import os
+import sys
+import shutil
+import uuid
+import contextlib
 import logging
-from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-
-# 엔진 임포트
-try:
-    from LangGraphScripts.accident_engine import AccidentDecisionEngine
-    from RAG.AccidentRAGEngine import AccidentRAGEngine
-except ImportError as e:
-    logging.error(f"Import Error: {e}")
+from typing import List
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from langchain_core.messages import HumanMessage
 
 # 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-#load_dotenv()
+# -------------------------------------------
+# 현재 파일의 부모 디렉토리를 시스템 경로에 추가
+# 그래야 옆 동네인 'RAG' 폴더를 찾을 수 있음
+# -------------------------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))    # 현재 폴더 경로
+parent_dir = os.path.dirname(current_dir)                   # 상위 프로젝트 루트 경로
+sys.path.append(parent_dir)
 
-# --- 데이터 스키마 ---
-class AnalysisRequest(BaseModel):
-    accident_type: str
-    speed: str
-    injury: str
-    pain_now: str
-    hospital_visit: str
-    vehicle_damage: str
-    adas_sensor: str
-    vehicle_type: str
-    evidence: str
-    opponent_attitude: str
-    opponent_mentions_hospital: str
-    opponent_mentions_insurance: str
-    notes: str
+# 모듈 import
+# from STT.google_stt_handler import GoogleSTTHandler       # 기능 제외로 주석 처리
+from LangGraphScripts.AccidentGraph import agent_instance
 
-class SourceDoc(BaseModel):
-    content: str
-    similarity: float
-    source: str
-
-class AnalysisResponse(BaseModel):
-    risk_bucket: str                    # LangGraph 결과: GREEN|YELLOW|RED
-    final_answer: str                   # LangGraph의 최종 판단 리스트
-    flags_red: List[str]                # 고위험 요소 리스트
-    flags_yellow: List[str]             # 주의 요소 리스트
-    relevant_sources: List[SourceDoc]   # RAG가 찾은 근거 문서들
-
-# --- 유틸리티 ---
-def build_query_from_request(req: AnalysisRequest) -> str:
-    return (
-        f"사고 유형: {req.accident_type}, 속도: {req.speed}, 부상: {req.injury}, "
-        f"통증: {req.pain_now}, 파손: {req.vehicle_damage}, 상대 태도: {req.opponent_attitude}. "
-        f"메모: {req.notes}. 관련 대응법과 판례 알려줘."
-    )
-
-# --- Lifespan: 엔진은 여기서 한 번만 생성합니다 ---
+# Lifespan(수명 주기) 관리
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.info("🚀 엔진 초기화 중 (RAG + LangGraph)...")
+    logger.info("DB 연결 풀 및 체크포인터 초기화 중...")
+    # agent의 setup() 메서드 하나만 호출하면 내부에서 다 처리됨
     try:
-        app.state.rag_engine = AccidentRAGEngine()
-        app.state.decision_engine = AccidentDecisionEngine()
-        logging.info("✅ 모든 엔진 로드 완료")
+        await agent_instance.setup()
     except Exception as e:
-        logging.error(f"❌ 엔진 초기화 실패: {e}")
+        logger.error(f"초기화 실퍄: {e}")
+    
     yield
-    # 종료 시 리소스 정리
-    if hasattr(app.state, "rag_engine"):
-        del app.state.rag_engine
-    if hasattr(app.state, "decision_engine"):
-        del app.state.decision_engine
-    logging.info("🛑 엔진 리소스 해제 완료")
+    # 종료시 연결 닫기
+    logger.info("DB 연결 종료 중...")
+    if agent_instance.pool:
+        await agent_instance.pool.close()
 
-# FastAPI 앱 생성 (lifespan 전달)
-app = FastAPI(title="교통사고 판단 보조 API", lifespan=lifespan)
+# FastAPI 앱 정의
+app = FastAPI(
+    title="교통사고 대응 AI (Supervisor Agent)",
+    lifespan=lifespan)      # lifespan 등록
 
-@app.get("/")
-def health_check():
-    return {"status": "ok", "message": "Accident Engine is healthy."}
+# 임시 저장소 설정
+TEMP_DIR = "temp_uploads"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-# main.py (핵심 로직 부분)
+@app.post("/analyze")
+async def analyze_accident(
+    text_query: str = Form(...),                            # 텍스트 입력은 필수가 됨
+    image_files: List[UploadFile] = File(None),
+    thread_id: str = Form(None)     # 멀티턴 세션 ID
+):
+    """
+    교통사고 분석 엔드포인트
 
-# main.py 내 AnalysisResponse 스키마는 동일하게 유지하되 UI에서 필터링합니다.
+    Args:
+        text_query: 사고 상황 텍스트 설명 (필수)
+        image_files: 현장 사진 (선택)
+        thread_id: 대화 세션 ID (선택, 없으면 자동 생성)
 
-@app.post("/analyze", response_model=AnalysisResponse)
-async def analyze(data: AnalysisRequest, request: Request):
+    Returns:
+        분석 결과 JSON
+    """
+    temp_image_paths = []
+    transcript = text_query                                 # 이제 transcript 는 순수하게 text_query 내용만 담음
+
     try:
-        rag_engine = request.app.state.rag_engine
-        decision_engine = request.app.state.decision_engine
+        # --- 1. 입력 검증 ---
+        if not transcript and not image_files:
+            raise HTTPException(
+                status_code=400, 
+                detail="입력 데이터(텍스트 또는 사진)가 없습니다."
+            )
+        
+        # --- 2. 이미지 파일 저장 ---
+        if image_files:
+            for img_file in image_files:
+                ext = img_file.filename.split(".")[-1]
+                path = os.path.join(TEMP_DIR, f"img_{uuid.uuid4()}.{ext}")
+                with open(path, "wb") as buffer:
+                    shutil.copyfileobj(img_file.file, buffer)
+                temp_image_paths.append(path)
+            logger.info(f"이미지 {len(temp_image_paths)}개 저장 완료")
 
-        # 1. RAG 실행 (여기서 rag_answer가 이미 여러 문헌을 합친 요약본임)
-        search_query = build_query_from_request(data)
-        rag_answer, docs = rag_engine.ask(search_query)
+        # --- 3. Thread ID 관리 ---
+        if not thread_id:
+            thread_id = str(uuid.uuid4())
+            logger.info(f"새로운 대화 세션 생성: {thread_id}")
 
-        # 2. 데이터 결합 및 LangGraph 실행
-        facts = data.model_dump()
-        facts["rag_context"] = rag_answer
-        graph_result = decision_engine.run_analysis(facts)
+        # --- 4. Config 설정 (Memory 사용) ---
+        config = {"configurable": {"thread_id": thread_id}}
 
-        # 3. 소스 문헌 리스트 구성 (내용은 포함하되 프론트에서 선택적 노출)
-        formatted_sources = [
-            SourceDoc(
-                content=getattr(doc, "page_content", ""),
-                similarity=float(score) if score is not None else 0.0,
-                source=getattr(doc, "metadata", {}).get("source", "판례/법규")
-            ) for doc, score in docs
-        ]
+        # --- 5. 초기 상태 주입 ---
+        initial_state = {
+            "messages": [HumanMessage(content=transcript)] if transcript else [],
+            "image_paths": temp_image_paths,
+            "image_summary": "",
+            "rag_context": ""
+        }
 
-        return AnalysisResponse(
-            risk_bucket=graph_result.get("risk_bucket", "정보부족"),
-            final_answer=graph_result.get("final_answer", "분석 실패"),
-            flags_red=graph_result.get("flags_red", []),
-            flags_yellow=graph_result.get("flags_yellow", []),
-            relevant_sources=formatted_sources
-        )
+        logger.info(f"Agent 실행 시작 (Thread: {thread_id})")
+
+        # agent_instance.graph_app을 사용하여 호출
+        # (setup())이 완료되었으므로 이제 None이 아님
+        if agent_instance.graph_app is None:
+            raise HTTPException(status_code=500, detail="Graph not initalized")
+
+        # --- 6. Supervisor Graph 실행 ---
+        if agent_instance.graph_app is None:
+            raise HTTPException(status_code=500, detail="Graph not initialized")
+        
+        final_state = await agent_instance.graph_app.ainvoke(initial_state, config=config)
+
+        # --- 7. 결과 추출 ---
+        structured_result = final_state.get("final_result", {})
+        rag_context = final_state.get("rag_context", "검색 결과 없음")
+
+        logger.info("분석 완료")
+
+        return {
+            "status": "success",
+            "thread_id": thread_id,
+            "transcript": transcript,
+            "rag_context": rag_context,
+            "result": structured_result
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"분석 중 오류 발생: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # --- 8. [개선] 임시 파일 안전하게 처리
+        for path in temp_image_paths:
+            with contextlib.suppress(FileNotFoundError, PermissionError):
+                os.remove(path)
+
+        if temp_image_paths:
+            logger.info(f"임시 파일 {len(temp_image_paths)}개 삭제 완료")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("🚀 벡엔드 서버를 시작합니다 (http://0.0.0.0:8000)...")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

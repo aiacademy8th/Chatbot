@@ -17,6 +17,11 @@
 ---
 
 ## 시작하기
+    # WSL 터미널에서 실행
+    sudo apt update
+    sudo apt install -y ffmpeg
+    ffmpeg -version
+    
     # uv 설치 (macOS/Linux)
     curl -LsSf https://astral.sh/uv/install.sh | sh
 
