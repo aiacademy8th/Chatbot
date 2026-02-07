@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'board_save.dart'; 
-import 'chat_widget_screen.dart';
+import 'chat.dart'; // ChatWidgetScreen -> ChatbotScreen으로 변경
 
 class ResultScreen extends StatelessWidget {
   final Map<String, dynamic> analysisResult;
@@ -214,11 +214,18 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // analysisResult는 백엔드 응답 전체를 포함하므로, 'result' 키에서 실제 분석 데이터를 추출합니다.
+    final Map<String, dynamic> actualAnalysisData = analysisResult['result'] as Map<String, dynamic>? ?? {};
+
     // 'fault_ratio'를 Map으로 받고, null일 경우 기본값을 설정합니다.
-    final faultRatio = analysisResult['fault_ratio'] as Map<String, dynamic>? ?? {'me': 50, 'opponent': 50};
+    final faultRatio = actualAnalysisData['fault_ratio'] as Map<String, dynamic>? ?? {'me': 50, 'opponent': 50};
     final opponentFault = _extractFaultPercentage(faultRatio);
     final recommendedAction = _getRecommendedAction(opponentFault);
     final actionColor = _getActionColor(recommendedAction);
+
+    // 상세 분석 내용과 참고 자료를 추출합니다.
+    final analysisText = actualAnalysisData['reasoning'] ?? '분석 결과가 없습니다.';
+    final referencesList = actualAnalysisData['legal_basis'] as List? ?? [];
 
     return Scaffold(
       appBar: AppBar(
@@ -398,7 +405,7 @@ class ResultScreen extends StatelessWidget {
                       border: Border.all(color: Colors.grey.shade300),
                     ),
                     child: Text(
-                      analysisResult['analysis'] ?? '분석 결과가 없습니다.',
+                      analysisText,
                       style: const TextStyle(
                         fontSize: 15,
                         height: 1.6,
@@ -412,7 +419,7 @@ class ResultScreen extends StatelessWidget {
             const SizedBox(height: 32),
 
             // 참고 자료 (RAG 결과)
-            if (analysisResult['references'] != null)
+            if (referencesList.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
@@ -426,7 +433,9 @@ class ResultScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    ...(analysisResult['references'] as List).map((ref) {
+                    ...(referencesList).map((ref) {
+                      // ref가 Map<String, dynamic> 타입인지 확인하고 안전하게 사용
+                      final referenceMap = ref is Map<String, dynamic> ? ref : {'source': ref.toString(), 'content': ''};
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(16),
@@ -444,7 +453,7 @@ class ResultScreen extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    ref['source'] ?? '출처 미상',
+                                    referenceMap['source'] ?? '출처 미상',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 14,
@@ -455,7 +464,7 @@ class ResultScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              ref['content'] ?? '',
+                              referenceMap['content'] ?? '',
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Colors.grey.shade800,
@@ -510,9 +519,8 @@ class ResultScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => ChatWidgetScreen(
-                              accidentData: const [], // 초기 데이터 없음
-                              threadId: threadId,
+                            builder: (context) => ChatbotScreen(
+                              accidentPhotos: const [], // chat.dart에 정의된 ChatbotScreen은 accidentPhotos를 필수로 받음
                             ),
                           ),
                         );

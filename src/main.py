@@ -19,17 +19,11 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# -------------------------------------------
-# 현재 파일의 부모 디렉토리를 시스템 경로에 추가
-# 그래야 옆 동네인 'RAG' 폴더를 찾을 수 있음
-# -------------------------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))    # 현재 폴더 경로
-parent_dir = os.path.dirname(current_dir)                   # 상위 프로젝트 루트 경로
-sys.path.append(parent_dir)
+
 
 # 모듈 import
 # from STT.google_stt_handler import GoogleSTTHandler       # 기능 제외로 주석 처리
-from LangGraphScripts.AccidentGraph import agent_instance, chat_agent_instance
+from src.LangGraphScripts.AccidentGraph import agent_instance, chat_agent_instance
 
 # Lifespan(수명 주기) 관리
 @asynccontextmanager
@@ -363,7 +357,7 @@ async def get_chat_history(thread_id: str):
 @app.get("/health")
 async def health_check():
     """서버 상태 확인"""
-    from RAG.AccidentRAGEngine import AccidentRAGEngine
+    from src.RAG.AccidentRAGEngine import AccidentRAGEngine
     engine = AccidentRAGEngine()
 
     return {
@@ -381,4 +375,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     print("🚀 벡엔드 서버를 시작합니다 (http://0.0.0.0:8001)...")
-    uvicorn.run("chatbot_backend copy:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

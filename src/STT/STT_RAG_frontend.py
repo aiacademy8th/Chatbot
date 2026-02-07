@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 # 백엔드 주소
-BACKEND_URL = "http://127.0.0.1:8000/analyze"
+BACKEND_URL = "https://chatbot-backend-599050237852.asia-northeast3.run.app/analyze"
 
 st.set_page_config(page_title="교통사고 AI 솔루션", page_icon="⚖️", layout="wide")
 

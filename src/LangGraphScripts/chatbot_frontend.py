@@ -6,8 +6,8 @@ from datetime import datetime
 # ------------------------------------------
 # 1. 설정 및 상수 정의
 # ------------------------------------------
-BACKEND_URL = "http://127.0.0.1:8000/analyze"
-CHAT_URL = "http://127.0.0.1:8000/chat"
+BACKEND_URL = "https://chatbot-backend-599050237852.asia-northeast3.run.app/analyze"
+CHAT_URL = "https://chatbot-backend-599050237852.asia-northeast3.run.app/chat"
 
 st.set_page_config(page_title="교통사고 AI 솔루션", page_icon="⚖️", layout="wide")
 

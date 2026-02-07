@@ -1,0 +1,30 @@
+# General project files and directories not needed in the backend Docker image
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.bak
+*.swp
+temp_uploads/
+data/
+json_key/
+pgvector/
+vectorDB/
+front/
+frontend/
+*.md # all markdown files at root, e.g., 2026_02_06_CLI_내용_저장.md, README.md
+uv.lock # uv uses this, but it doesn't need to be in the final image after installation
+pyproject.toml # similar to uv.lock, used by uv to install, but not needed in runtime
+
+# Exclude specific files/directories within 'src' that are not part of the main application runtime
+src/streamlit_app.py
+src/DB/
+src/STT/
+src/LangGraphScripts/chatbot_backend copy.py
+src/LangGraphScripts/chatbot_frontend.py
+src/LangGraphScripts/chatbot_backend.py # Assuming this is not the one main.py relies on
+src/RAG/build_vector_DB.py
+src/RAG/qa_bot_old.py
+src/RAG/rag_process.py

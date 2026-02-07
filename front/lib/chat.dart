@@ -39,7 +39,14 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   
   // 로딩 상태
   bool _isLoading = false;
+  // 채팅 모드 활성화 여부
+  bool _inChatMode = false;
+  // 현재 대화 세션 ID
+  String? _currentThreadId;
 
+  // 백엔드 배포 주소
+  final String baseUrl = dotenv.env['BACKEND_URL'] ?? "";
+  
   // 7단계 질문 정의
   final List<QuestionData> _questions = [
     // 1. 시간, 블랙박스 유무
@@ -225,7 +232,8 @@ void _startChat() {
   // }
 
   Future<void> _analyzeWithGPT() async {
-  _addBotMessage('입력하신 정보를 분석 중입니다... 🤔');
+    print('💡 _analyzeWithGPT 함수 호출됨.'); // 추가된 로그
+    _addBotMessage('입력하신 정보를 분석 중입니다... 🤔');
   
   if (!mounted) return;
   
@@ -245,40 +253,32 @@ void _startChat() {
     if (mounted) {
       setState(() {
         _isLoading = false;
+        // _inChatMode = true; // 채팅 모드 활성화 (주석 처리)
+        // _currentThreadId = threadId; // 스레드 ID 저장 (주석 처리)
       });
-      
-      // 백엔드에서 받은 legal_references (List<dynamic> or null)를
-      // ResultScreen이 기대하는 List<Map<String, String>> 형태로 변환합니다.
-      final referencesList = analysisResultData['legal_basis'] as List? ?? [];
-      final formattedReferences = referencesList.map((ref) {
-        return {'source': '참고 자료', 'content': ref.toString()};
-      }).toList();
       
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ResultScreen(
-            // 백엔드 응답 구조에 맞게 데이터를 전달합니다.
-            analysisResult: {
-              'fault_ratio': analysisResultData['fault_ratio'] as Map<String, dynamic>?,
-              'analysis': analysisResultData['reasoning'] ?? '분석 결과 없음',
-              'references': formattedReferences, // 변환된 리스트를 전달
-            },
-            userAnswers: _userAnswers,
-            threadId: threadId, // 추출한 threadId 전달
+            analysisResult: backendResponse, // 백엔드 응답 전체 전달
+            userAnswers: _userAnswers,      // 사용자 답변 전달
+            threadId: threadId,             // 스레드 ID 전달
           ),
         ),
       );
     }
-  } catch (e) {
+  } catch (e, stacktrace) { // Catch both exception and stacktrace
     // 디버깅을 위해 오류를 콘솔에 출력
-    print('❌ [Frontend Error] Failed to process analysis response: $e');
+    print('❌ [Frontend Error - callBackendAnalysis] Failed to process analysis response: $e');
+    print('Stacktrace: $stacktrace'); // Print stacktrace
     if (mounted) {
       setState(() {
         _isLoading = false;
       });
-      _addBotMessage('죄송합니다. 분석 중 오류가 발생했습니다.\n오류: $e');
+      _addBotMessage('죄송합니다. 분석 중 오류가 발생했습니다.\n오류: ${e.toString()}');
     }
+    throw Exception('API 호출 실패: ${e.toString()}'); // Re-throw with more detail if needed by caller
   }
 }
 
@@ -340,7 +340,8 @@ List<Map<String, String>> _getRagReferences() {
 
   // 백엔드 분석 API 호출
   Future<Map<String, dynamic>> _callBackendAnalysis(String prompt) async {
-    final url = Uri.parse('http://localhost:8001/analyze');
+    print('💡 _callBackendAnalysis 함수 호출됨. URL: $baseUrl/analyze'); // 추가된 로그
+    final url = Uri.parse('$baseUrl/analyze');
     final request = http.MultipartRequest('POST', url);
 
     // 텍스트 쿼리 추가
@@ -368,6 +369,46 @@ List<Map<String, String>> _getRagReferences() {
       // 디버깅을 위해 오류를 콘솔에 출력
       print('❌ [Backend Response] Error: $errorBody');
       throw Exception('API 호출 실패: ${response.statusCode}\n$errorBody');
+    }
+  }
+
+  // 백엔드 챗 API 호출
+  Future<void> _callBackendChat(String threadId, String userMessage) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final url = Uri.parse('$baseUrl/chat');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json', // JSON으로 변경
+          'Accept': 'application/json; charset=utf-8',
+        },
+        body: jsonEncode({ // 데이터를 JSON 문자열로 변환
+          'thread_id': threadId,
+          'user_message': userMessage,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseBody = utf8.decode(response.bodyBytes); // 한글 인코딩
+        final data = jsonDecode(responseBody);
+        final aiResponse = data['response'] ?? '응답을 받지 못했습니다.';
+        _addBotMessage(aiResponse);
+      } else {
+        final errorBody = utf8.decode(response.bodyBytes);
+        _addBotMessage('챗봇 응답 오류: ${response.statusCode}\n$errorBody');
+        print('❌ [Backend Chat Error] ${response.statusCode}: $errorBody');
+      }
+    } catch (e) {
+      _addBotMessage('챗봇 연결 오류: $e');
+      print('❌ [Frontend Chat Error] $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -445,7 +486,7 @@ List<Map<String, String>> _getRagReferences() {
             ),
           
           // 텍스트 입력 (7번째 질문용)
-          if (_currentStep == 6)
+          if (_currentStep == _questions.length - 1 || _inChatMode) // Show input for last question or in chat mode
             _buildTextInput(),
         ],
       ),
@@ -745,14 +786,25 @@ List<Map<String, String>> _getRagReferences() {
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.send),
-            onPressed: () {
+            onPressed: () async { // Make it async
               final text = _textController.text.trim();
-              _handleAnswer(
-                _questions[_currentStep].id,
-                text.isEmpty ? '없음' : text,
-                text.isEmpty ? '추가 정보 없음' : text,
-              );
+              // if (text.isEmpty) return; // 이 줄을 제거하여 빈 입력도 허용
+
+              _addUserMessage(text.isNotEmpty ? text : '(입력 없음)'); // 빈 입력 시 "(입력 없음)" 표시
               _textController.clear();
+
+              if (_inChatMode && _currentThreadId != null) {
+                await _callBackendChat(_currentThreadId!, text);
+              } else {
+                // Existing logic for question answering
+                // The last question is 'additional_info' which is type text.
+                // We directly pass the text here.
+                _handleAnswer(
+                  _questions[_currentStep].id,
+                  text,
+                  text,
+                );
+              }
             },
           ),
         ],

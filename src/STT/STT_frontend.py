@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 # 벡인드 주소
-BACKEND_URL = "http://127.0.0.1:8000/stt"
+BACKEND_URL = "https://chatbot-backend-599050237852.asia-northeast3.run.app/stt"
 
 st.set_page_config(page_title="교통사고 AI 음성 입력", page_icon="🚓")
 st.title("🚓 교통사고 정황 음성 리포트")
