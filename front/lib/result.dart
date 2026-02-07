@@ -7,15 +7,18 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'board_save.dart'; 
+import 'chat_widget_screen.dart';
 
 class ResultScreen extends StatelessWidget {
   final Map<String, dynamic> analysisResult;
   final Map<String, dynamic> userAnswers;
+  final String threadId;
 
   const ResultScreen({
     super.key,
     required this.analysisResult,
     required this.userAnswers,
+    required this.threadId,
   });
 
   // ⭐ 게시글 ID 생성 (1부터 시작)
@@ -487,6 +490,40 @@ class ResultScreen extends StatelessWidget {
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 4,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // 챗봇 진행 버튼 추가
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatWidgetScreen(
+                              accidentData: const [], // 초기 데이터 없음
+                              threadId: threadId,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.chat_bubble_outline, size: 24),
+                      label: const Text(
+                        '챗봇 진행',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),

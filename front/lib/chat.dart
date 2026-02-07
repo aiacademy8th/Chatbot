@@ -235,8 +235,12 @@ void _startChat() {
 
   try {
     final prompt = _buildAnalysisPrompt();
-    final backendResponseString = await _callBackendAnalysis(prompt);
-    final analysisResultData = jsonDecode(backendResponseString) as Map<String, dynamic>;
+    final backendResponse = await _callBackendAnalysis(prompt);
+    
+    // 백엔드 응답에서 결과 데이터와 thread_id 추출
+    final analysisResultData = backendResponse['result'] as Map<String, dynamic>;
+    final threadId = backendResponse['thread_id'] as String? ?? '';
+
 
     if (mounted) {
       setState(() {
@@ -261,6 +265,7 @@ void _startChat() {
               'references': formattedReferences, // 변환된 리스트를 전달
             },
             userAnswers: _userAnswers,
+            threadId: threadId, // 추출한 threadId 전달
           ),
         ),
       );
@@ -334,7 +339,7 @@ List<Map<String, String>> _getRagReferences() {
   }
 
   // 백엔드 분석 API 호출
-  Future<String> _callBackendAnalysis(String prompt) async {
+  Future<Map<String, dynamic>> _callBackendAnalysis(String prompt) async {
     final url = Uri.parse('http://localhost:8001/analyze');
     final request = http.MultipartRequest('POST', url);
 
@@ -357,7 +362,7 @@ List<Map<String, String>> _getRagReferences() {
       // 디버깅을 위해 응답을 콘솔에 출력
       print('✅ [Backend Response] Success: $responseBody');
       final data = jsonDecode(responseBody);
-      return jsonEncode(data['result']);
+      return data;
     } else {
       final errorBody = await response.stream.bytesToString();
       // 디버깅을 위해 오류를 콘솔에 출력
