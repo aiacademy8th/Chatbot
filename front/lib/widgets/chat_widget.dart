@@ -46,40 +46,63 @@ class _ChatWidgetState extends State<ChatWidget> {
     _controller.clear();
 
     // final prompt = _buildPrompt(text); // 프롬프트 빌드는 더 이상 필요 없음
-    final responseText = await _callBackendChat(text);
+    await _callBackendChatStream(text);
 
     setState(() {
-      _messages.add({"role": "bot", "content": responseText});
       _isSending = false;
     });
   }
 
-  Future<String> _callBackendChat(String userMessage) async {
-    final url = Uri.parse('http://localhost:8001/chat');
+  Future<void> _callBackendChatStream(String userMessage) async {
+    final url = Uri.parse('http://localhost:8001/chat/stream');
     
     try {
-      final response = await http.post(
-        url,
-        body: {
+      final request = http.Request('POST', url)
+        ..bodyFields = {
           'thread_id': widget.threadId,
           'user_message': userMessage,
-        },
-      );
+        };
 
-      if (response.statusCode == 200) {
-        // UTF-8로 응답을 디코딩하여 한글 깨짐 방지
-        final responseBody = utf8.decode(response.bodyBytes);
-        final data = jsonDecode(responseBody);
-        return data['response'] ?? '백엔드로부터 응답이 없습니다.';
+      final streamedResponse = await request.send();
+
+      if (streamedResponse.statusCode == 200) {
+        String currentBotResponse = "";
+        _messages.add({"role": "bot", "content": ""}); // 스트리밍을 위한 초기 빈 메시지 추가
+
+        await for (var chunk in streamedResponse.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+          if (chunk.startsWith('data: ')) {
+            final jsonData = jsonDecode(chunk.substring(5)); // 'data: ' 접두사 제거
+            
+            if (jsonData.containsKey('chunk')) {
+              currentBotResponse += jsonData['chunk'];
+              setState(() {
+                _messages.last["content"] = currentBotResponse;
+              });
+            } else if (jsonData.containsKey('done') && jsonData['done'] == true) {
+              print("[Chat Stream] 스트리밍 완료");
+              break; // 스트리밍 종료
+            } else if (jsonData.containsKey('error')) {
+              print('❌ [Backend Chat Stream Error] ${jsonData['error']}');
+              currentBotResponse += "\n오류: ${jsonData['error']}";
+              setState(() {
+                _messages.last["content"] = currentBotResponse;
+              });
+              break;
+            }
+          }
+        }
       } else {
-        // UTF-8로 오류 메시지 디코딩
-        final errorBody = utf8.decode(response.bodyBytes);
-        print('❌ [Backend Chat Error] Status: ${response.statusCode}, Body: $errorBody');
-        return '오류: 백엔드와 통신에 실패했습니다. (코드: ${response.statusCode})';
+        final errorBody = await streamedResponse.stream.bytesToString();
+        print('❌ [Backend Chat Error] Status: ${streamedResponse.statusCode}, Body: $errorBody');
+        setState(() {
+          _messages.add({"role": "bot", "content": '오류: 백엔드와 통신에 실패했습니다. (코드: ${streamedResponse.statusCode})'});
+        });
       }
     } catch (e) {
       print('❌ [Frontend Chat Error] Exception: $e');
-      return '오류: 메시지를 보내는 중 예외가 발생했습니다.';
+      setState(() {
+        _messages.add({"role": "bot", "content": '오류: 메시지를 보내는 중 예외가 발생했습니다.'});
+      });
     }
   }
 
