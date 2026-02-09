@@ -49,11 +49,11 @@ class ResultScreen extends StatelessWidget {
   Color _getActionColor(String action) {
     switch (action) {
       case '보험 유리':
-        return Colors.green;    // ⭐ 초록색 (내 과실 낮음 = 유리함)
+        return Colors.red;    // ⭐ 초록색 (내 과실 낮음 = 유리함)
       case '보험 권장':
         return Colors.orange;   // ⭐ 주황색 (중간)
       case '합의 유리':
-        return Colors.red;      // ⭐ 빨간색 (내 과실 높음 = 합의 권장)
+        return Colors.green;      // ⭐ 빨간색 (내 과실 높음 = 합의 권장)
       default:
         return Colors.grey;
     }
@@ -259,23 +259,23 @@ class ResultScreen extends StatelessWidget {
                     children: [
                       _buildTrafficLight(
                         '보험 유리',
-                        Colors.green,      // ⭐ 초록색
+                        Colors.red,      // ⭐ 초록색
                         recommendedAction == '보험 유리',
-                        '1~50%',          // ⭐ 내 과실 범위
+                        // '1~50%',          // ⭐ 내 과실 범위
                       ),
                       const SizedBox(width: 32),
                       _buildTrafficLight(
                         '보험 권장',
                         Colors.orange,     // ⭐ 주황색
                         recommendedAction == '보험 권장',
-                        '51~80%',         // ⭐ 내 과실 범위
+                        // '51~80%',         // ⭐ 내 과실 범위
                       ),
                       const SizedBox(width: 32),
                       _buildTrafficLight(
                         '합의 유리',
-                        Colors.red,        // ⭐ 빨간색
+                        Colors.green,        // ⭐ 빨간색
                         recommendedAction == '합의 유리',
-                        '81~100%',        // ⭐ 내 과실 범위
+                        // '81~100%',        // ⭐ 내 과실 범위
                       ),
                     ],
                   ),
@@ -583,7 +583,7 @@ class ResultScreen extends StatelessWidget {
   }
 
   // 신호등 위젯
-  Widget _buildTrafficLight(String label, Color color, bool isActive, String range) {
+  Widget _buildTrafficLight(String label, Color color, bool isActive) {
     return Column(
       children: [
         Container(
@@ -620,13 +620,13 @@ class ResultScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          range,
-          style: TextStyle(
-            fontSize: 11,
-            color: Colors.grey.shade600,
-          ),
-        ),
+        // Text(
+        //   range,
+        //   style: TextStyle(
+        //     fontSize: 11,
+        //     color: Colors.grey.shade600,
+        //   ),
+        // ),
       ],
     );
   }

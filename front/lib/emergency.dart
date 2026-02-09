@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:ui';
 import 'photo.dart';
 
 class EmergencyScreen extends StatefulWidget {
@@ -28,10 +29,10 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     if (state == AppLifecycleState.resumed && _justMadeCall) {
       _justMadeCall = false;
-      
+
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
           _showPhotoPrompt(_lastServiceName);
@@ -108,60 +109,104 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
     );
   }
 
+  Widget _glassButton({required String label, required IconData icon, required VoidCallback onTap, required Color color}) {
+    return SizedBox(
+      width: double.infinity,
+      height: 80,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: InkWell(
+            onTap: onTap,
+            splashColor: Colors.white.withOpacity(0.2),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withOpacity(0.4)),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withOpacity(0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 32, color: color),
+                  const SizedBox(width: 12),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('긴급 전화'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      body: Container(
+        color: Colors.white,  // 배경 흰색
+        width: double.infinity,
+        height: double.infinity,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            SizedBox(
-              width: double.infinity,
-              height: 80,
-              child: ElevatedButton(
-                onPressed: () => _makePhoneCall('119', '119'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.local_hospital, size: 32),
-                    SizedBox(width: 12),
-                    Text('119', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            // 가운데 초록 원형 그라데이션
+            Container(
+              width: 25000,
+              height: 25000,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.green.shade300.withOpacity(0.4),
+                    Colors.green.shade100.withOpacity(0.0),
                   ],
+                  center: Alignment.center,
+                  radius: 0.7,
                 ),
               ),
             ),
-            const SizedBox(height: 60),
-            SizedBox(
-              width: double.infinity,
-              height: 80,
-              child: ElevatedButton(
-                onPressed: () => _makePhoneCall('112', '112'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            // 버튼 영역
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _glassButton(
+                    label: '119',
+                    icon: Icons.local_hospital,
+                    color: Colors.red.shade700,
+                    onTap: () => _makePhoneCall('119', '119'),
                   ),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.local_police, size: 32),
-                    SizedBox(width: 12),
-                    Text('112', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  ],
-                ),
+                  const SizedBox(height: 40),
+                  _glassButton(
+                    label: '112',
+                    icon: Icons.local_police,
+                    color: Colors.red.shade700,
+                    onTap: () => _makePhoneCall('112', '112'),
+                  ),
+                ],
               ),
             ),
           ],
