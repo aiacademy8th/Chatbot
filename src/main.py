@@ -140,16 +140,86 @@ async def get_board_list():
         if not agent_instance.pool:
             raise HTTPException(status_code=500, detail="DB 연결 실패")
         async with agent_instance.pool.connection() as conn:
-            pass
+            async with conn.cursor() as cur:
+                # ID, 제목, 날짜만 조회 (내용은 비밀번호 검증 후 보여줌)
+                query = """
+                SELECT id, accident_title, created_at
+                FROM accident_board
+                ORDER BY id Desc
+                """
+                await cur.execute(query)
+                rows = await cur.fetchall()
+
+                # 결과 json 반환
+                result = []
+                for row in rows:
+                    result.append({
+                        "id": row[0],
+                        "title": row[1],
+                        "create_at": row[2].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+
+                return {"status": "success", "list": result}
+
     except Exception as e:
-        pass
+        logger.error(f"목록 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="목록을 불러오지 못했습니다.")
 
 # --------------------------------------------
 # 게시판 상세 조회 (with 비밀번호 검증)
 # --------------------------------------------
 @app.post("/board/view")
 async def view_board_detail(req: BoardDetailRequest):
-    pass
+    """
+    비밀번호가 일치하면 게시글 전체 내용을 반환합니다.
+    """
+    
+    try:
+        if not agent_instance.pool:
+            raise HTTPException(status_code=500, detail="DB 연결 실패")
+        
+        async with agent_instance.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # 해당 ID의 모든 정보 조회
+                query = "SELECT * FROM accident_board WHERE id = %s"
+
+                await cur.execute(query, (req.post_id, ))
+                row = await cur.fetchone()
+
+                # 1. 게시글이 없는 경우
+                if not row:
+                    raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
+                
+                # row[1]이 board_password 컬럼 (테이블 생성 순서 기준)
+                # CREATE TABLE 순서: id, board_password, accident_title...
+                db_password = row[1]
+
+                # 2. 비밀번호 불일치 확인
+                # DB의 char(4)는 공백이 포함될수 있으므로 .strip()으로 공백 제거 후 비교
+                if db_password.strip() != req.password.strip():
+                    raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+                
+                # 3. 비밀번호 일치 시 상세 데이터 변환
+                return {
+                    "status": "success",
+                    "data": {
+                        "id": row[0],
+                        # 비밀번호는 보안상 반환하지 않거나 마스킹 처리
+                        "title": row[2],                                        # accident_title
+                        "info": row[3],                                         # accident_info
+                        "fault": row[4],                                        # accident_ratio
+                        "result": row[5],                                       # accident_result
+                        "legal": row[6],                                        # accident_basis
+                        "summary": row[7],                                      # accident_summary
+                        "date": row[8].strftime("%Y-%m-%d %H:%M:%S"),           # created_at
+                    }
+                }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"상세 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="상세 정보를 불러오는 중 오류가 발생했습니다.")
 
 @app.post("/analyze")
 async def analyze_accident(
