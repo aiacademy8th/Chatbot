@@ -36,6 +36,10 @@ class BoardEntry(BaseModel):
     legal_basis: str            # 법적 근거
     accident_summary: str       # 최종 답변 요약
 
+# 게시글 상세 조회 요청 모델 (비밀번호 포함)
+class BoardDetailRequest(BaseModel):
+    post_id: int        # 보고 싶은 게시글 번호
+    password: str       # 입력한 비밀번호
 
 # Lifespan(수명 주기) 관리
 @asynccontextmanager
@@ -123,6 +127,29 @@ async def save_to_board(entry: BoardEntry):
     except Exception as e:
         logger.error(f"게시판 저장 오류: {e}")
         raise HTTPException(status_code=500, detail="DB 저장 중 오류가 발생했습니다.")
+
+# --------------------------------------------
+# 게시판 목록 조회 (list)
+# --------------------------------------------
+@app.get("/board/list")
+async def get_board_list():
+    """
+    게시글 목록을 최신순으로 반환합니다. (비밀번호 제외, 제목과 날짜만)
+    """
+    try:
+        if not agent_instance.pool:
+            raise HTTPException(status_code=500, detail="DB 연결 실패")
+        async with agent_instance.pool.connection() as conn:
+            pass
+    except Exception as e:
+        pass
+
+# --------------------------------------------
+# 게시판 상세 조회 (with 비밀번호 검증)
+# --------------------------------------------
+@app.post("/board/view")
+async def view_board_detail(req: BoardDetailRequest):
+    pass
 
 @app.post("/analyze")
 async def analyze_accident(
