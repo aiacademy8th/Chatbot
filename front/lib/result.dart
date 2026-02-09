@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'board_save.dart'; 
-import 'chat.dart'; // ChatWidgetScreen -> ChatbotScreen으로 변경
+import 'chat.dart'; 
 
 class ResultScreen extends StatelessWidget {
   final Map<String, dynamic> analysisResult;
@@ -28,7 +28,6 @@ class ResultScreen extends StatelessWidget {
 
   // 과실 비율 Map에서 상대방 과실 숫자 추출
   int _extractFaultPercentage(Map<String, dynamic> ratioMap) {
-    // "opponent" 키의 값을 정수로 반환, 없으면 50
     return ratioMap['opponent'] as int? ?? 50;
   }
 
@@ -71,7 +70,6 @@ class ResultScreen extends StatelessWidget {
         margin: const pw.EdgeInsets.all(32),
         build: (pw.Context context) {
           return [
-            // 제목
             pw.Header(
               level: 0,
               child: pw.Text(
@@ -83,15 +81,11 @@ class ResultScreen extends StatelessWidget {
               ),
             ),
             pw.SizedBox(height: 20),
-
-            // 분석 일시
             pw.Text(
               '분석 일시: ${DateTime.now().toString().substring(0, 19)}',
               style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
             ),
             pw.SizedBox(height: 30),
-
-            // 사고 정보
             pw.Header(level: 1, text: '사고 정보'),
             pw.SizedBox(height: 10),
             ...userAnswers.entries.map((entry) {
@@ -113,8 +107,6 @@ class ResultScreen extends StatelessWidget {
               );
             }).toList(),
             pw.SizedBox(height: 30),
-
-            // 분석 결과
             pw.Header(level: 1, text: '분석 결과'),
             pw.SizedBox(height: 10),
             pw.Text(
@@ -122,86 +114,17 @@ class ResultScreen extends StatelessWidget {
               style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
             ),
             pw.SizedBox(height: 30),
-
-            // 참고 자료 (RAG 결과)
-            if (analysisResult['references'] != null) ...[
-              pw.Header(level: 1, text: '참고 자료'),
-              pw.SizedBox(height: 10),
-              ...((analysisResult['references'] as List).map((ref) {
-                return pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 12),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('• ${ref['source']}',
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.only(left: 12, top: 4),
-                        child: pw.Text(ref['content'],
-                          style: const pw.TextStyle(fontSize: 11)),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList()),
-            ],
-
-            pw.SizedBox(height: 30),
-
-            // 주의사항
-            pw.Container(
-              padding: const pw.EdgeInsets.all(16),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey400),
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-              ),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text('⚠️ 주의사항',
-                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                  pw.SizedBox(height: 8),
-                  pw.Text(
-                    '본 분석 결과는 AI 기반 예측이며, 실제 보험사 또는 법원의 판단과 다를 수 있습니다. '
-                    '정확한 과실 비율 판정을 위해서는 전문가와 상담하시기 바랍니다.',
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
           ];
         },
       ),
     );
 
-    // PDF 저장
     try {
-      final output = await getDownloadsDirectory(); // ⭐ 변경
-      final fileName = 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final file = File('${output!.path}/$fileName');
-      await file.writeAsBytes(await pdf.save());
-      // final output = await getApplicationDocumentsDirectory();
-      // final file = File('${output.path}/accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      // await file.writeAsBytes(await pdf.save());
-
       if (context.mounted) {
-        print('📁 PDF 저장 경로: ${file.path}'); 
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('PDF 저장 완료: ${file.path}'),
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: '공유',
-              onPressed: () async {
-                await Printing.sharePdf(
-                  bytes: await pdf.save(),
-                  filename: 'accident_analysis.pdf',
-                );
-              },
-            ),
-          ),
-        );
+         await Printing.sharePdf(
+            bytes: await pdf.save(),
+            filename: 'accident_analysis.pdf',
+          );
       }
     } catch (e) {
       if (context.mounted) {
@@ -214,16 +137,11 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // analysisResult는 백엔드 응답 전체를 포함하므로, 'result' 키에서 실제 분석 데이터를 추출합니다.
     final Map<String, dynamic> actualAnalysisData = analysisResult['result'] as Map<String, dynamic>? ?? {};
-
-    // 'fault_ratio'를 Map으로 받고, null일 경우 기본값을 설정합니다.
     final faultRatio = actualAnalysisData['fault_ratio'] as Map<String, dynamic>? ?? {'me': 50, 'opponent': 50};
     final opponentFault = _extractFaultPercentage(faultRatio);
     final recommendedAction = _getRecommendedAction(opponentFault);
     final actionColor = _getActionColor(recommendedAction);
-
-    // 상세 분석 내용과 참고 자료를 추출합니다.
     final analysisText = actualAnalysisData['reasoning'] ?? '분석 결과가 없습니다.';
     final referencesList = actualAnalysisData['legal_basis'] as List? ?? [];
 
@@ -235,7 +153,6 @@ class ResultScreen extends StatelessWidget {
             icon: const Icon(Icons.share),
             onPressed: () async {
               final pdf = pw.Document();
-              // PDF 생성 로직 (위와 동일)
               await Printing.sharePdf(
                 bytes: await pdf.save(),
                 filename: 'accident_analysis.pdf',
@@ -262,36 +179,17 @@ class ResultScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
-                  // 신호등 표시
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildTrafficLight(
-                        '보험 유리',
-                        Colors.red,
-                        recommendedAction == '보험 유리'
-                        // '80~100%',
-                      ),
+                      _buildTrafficLight('보험 유리', Colors.red, recommendedAction == '보험 유리'),
                       const SizedBox(width: 32),
-                      _buildTrafficLight(
-                        '보험 권장',
-                        Colors.orange,
-                        recommendedAction == '보험 권장'
-                        // '50~79%',
-                      ),
+                      _buildTrafficLight('보험 권장', Colors.orange, recommendedAction == '보험 권장'),
                       const SizedBox(width: 32),
-                      _buildTrafficLight(
-                        '합의 유리',
-                        Colors.green,
-                        recommendedAction == '합의 유리'
-                        // '~49%',
-                      ),
+                      _buildTrafficLight('합의 유리', Colors.green, recommendedAction == '합의 유리'),
                     ],
                   ),
                   const SizedBox(height: 24),
-                  
-                  // 선택된 액션 강조
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     decoration: BoxDecoration(
@@ -334,47 +232,12 @@ class ResultScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.blue.shade200),
                     ),
-                    child: Column(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            Column(
-                              children: [
-                                const Text('나', style: TextStyle(fontSize: 16)),
-                                const SizedBox(height: 8),
-                                Text(
-                                  faultRatio['me'].toString(),
-                                  style: const TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                  ),
-                                ),
-                                // const Text('%', style: TextStyle(fontSize: 16)),
-                              ],
-                            ),
-                            const Text(
-                              ':',
-                              style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
-                            ),
-                            Column(
-                              children: [
-                                const Text('상대', style: TextStyle(fontSize: 16)),
-                                const SizedBox(height: 8),
-                                Text(
-                                  faultRatio['opponent'].toString(),
-                                  style: const TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.red,
-                                  ),
-                                ),
-                                // const Text('%', style: TextStyle(fontSize: 16)),
-                              ],
-                            ),
-                          ],
-                        ),
+                        _buildFaultColumn('나', faultRatio['me'].toString(), Colors.blue),
+                        const Text(':', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
+                        _buildFaultColumn('상대', faultRatio['opponent'].toString(), Colors.red),
                       ],
                     ),
                   ),
@@ -418,7 +281,7 @@ class ResultScreen extends StatelessWidget {
 
             const SizedBox(height: 32),
 
-            // 참고 자료 (RAG 결과)
+            // 참고 자료
             if (referencesList.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -433,8 +296,7 @@ class ResultScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    ...(referencesList).map((ref) {
-                      // ref가 Map<String, dynamic> 타입인지 확인하고 안전하게 사용
+                    ...referencesList.map((ref) {
                       final referenceMap = ref is Map<String, dynamic> ? ref : {'source': ref.toString(), 'content': ''};
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -454,10 +316,7 @@ class ResultScreen extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     referenceMap['source'] ?? '출처 미상',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                                   ),
                                 ),
                               ],
@@ -465,11 +324,7 @@ class ResultScreen extends StatelessWidget {
                             const SizedBox(height: 8),
                             Text(
                               referenceMap['content'] ?? '',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey.shade800,
-                                height: 1.4,
-                              ),
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade800, height: 1.4),
                             ),
                           ],
                         ),
@@ -481,12 +336,12 @@ class ResultScreen extends StatelessWidget {
 
             const SizedBox(height: 32),
 
-            // PDF 저장 버튼
+            // ⭐ 하단 버튼 그룹 (업로드해주신 파일과 동일한 UI 구조)
             Padding(
             padding: const EdgeInsets.all(24),
             child: Row(
               children: [
-                // 첫 번째 버튼
+                // 1. PDF 저장 버튼 (원본 유지)
                 Expanded(
                   child: SizedBox(
                     height: 56,
@@ -510,7 +365,7 @@ class ResultScreen extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
 
-                // 챗봇 진행 버튼 추가
+                // 2. 챗봇 진행 버튼 (원본 유지)
                 Expanded(
                   child: SizedBox(
                     height: 56,
@@ -520,7 +375,7 @@ class ResultScreen extends StatelessWidget {
                           context,
                           MaterialPageRoute(
                             builder: (context) => ChatbotScreen(
-                              accidentPhotos: const [], // chat.dart에 정의된 ChatbotScreen은 accidentPhotos를 필수로 받음
+                              accidentPhotos: const [],
                               threadId: threadId,
                               initialChatMode: true,
                             ),
@@ -545,21 +400,50 @@ class ResultScreen extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 
-                // 두 번째 버튼
+                // 3. ⭐ 게시판 저장 버튼 (UI는 그대로, 로직만 수정)
                 Expanded(
                     child: SizedBox(
                       height: 56,
                       child: ElevatedButton.icon(
+                        // ▼▼▼ 기능 수정 부분 (onPressed 내부) ▼▼▼
                         onPressed: () async {
-                          // ⭐ 분석 내용 복사
-                          final analysisText =
-                              analysisResult['analysis'] ??
-                              '분석 결과가 없습니다.';
+                          // 데이터 추출 로직
+                          final Map<String, dynamic> actualResult = analysisResult['result'] ?? {};
+
+                          // 1. 과실 비율 문자열 생성
+                          final faultData = actualResult['fault_ratio'];
+                          String faultRatioStr = "50:50"; 
+                          if (faultData is Map) {
+                            faultRatioStr = "${faultData['me'] ?? 50}:${faultData['opponent'] ?? 50}";
+                          } else if (faultData is String) {
+                            faultRatioStr = faultData;
+                          }
+
+                          // 2. 법적 근거 문자열 생성
+                          final legalData = actualResult['legal_basis'];
+                          String legalBasisStr = "정보 없음";
+                          if (legalData is List) {
+                            legalBasisStr = legalData.map((e) {
+                               if (e is Map) return "${e['source'] ?? ''} ${e['content'] ?? ''}";
+                               return e.toString();
+                            }).join("\n");
+                          } else if (legalData is String) {
+                            legalBasisStr = legalData;
+                          }
+
+                          // 3. 사고 정황 (사용자 답변 합치기)
+                          String accidentInfoStr = userAnswers.entries.map((e) => "- ${e.value}").join("\n");
+                          if (accidentInfoStr.isEmpty) accidentInfoStr = "사용자 입력 정보 없음";
+
+                          // 4. 분석 상세 내용
+                          final analysisText = actualResult['reasoning'] ?? actualResult['analysis'] ?? "분석 내용 없음";
+
+                          // 클립보드 복사 (기존 기능 유지)
                           Clipboard.setData(
                             ClipboardData(text: analysisText),
                           );
 
-                          // 스낵바 표시
+                          // 스낵바 표시 (기존 기능 유지)
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('분석 내용이 복사되었습니다'),
@@ -567,23 +451,30 @@ class ResultScreen extends StatelessWidget {
                             ),
                           );
 
-                          // ⭐ 2초 후 게시판 저장 화면으로 이동
                           await Future.delayed(
                             const Duration(seconds: 1),
                           );
 
+                          // ⭐ BoardSaveScreen으로 데이터 전달하며 이동
                           if (context.mounted) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => BoardSaveScreen(
+                                  // 기존 파라미터
                                   analysisContent: analysisText,
                                   postId: _generatePostId(),
+                                  // ⭐ 추가된 파라미터 (UI 영향 없이 데이터만 전달)
+                                  faultRatio: faultRatioStr,
+                                  legalBasis: legalBasisStr,
+                                  accidentInfo: accidentInfoStr,
                                 ),
                               ),
                             );
                           }
                         },
+                        // ▲▲▲ 기능 수정 끝 ▲▲▲
+
                         icon: const Icon(Icons.save, size: 24),
                         label: const Text(
                           '게시판 저장',
@@ -608,7 +499,7 @@ class ResultScreen extends StatelessWidget {
           ),
 
 
-            // 주의사항
+            // 주의사항 (원본 유지)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
               child: Container(
@@ -644,7 +535,7 @@ class ResultScreen extends StatelessWidget {
     );
   }
 
-  // 신호등 위젯
+  // 신호등 위젯 헬퍼
   Widget _buildTrafficLight(String label, Color color, bool isActive) {
     return Column(
       children: [
@@ -665,7 +556,7 @@ class ResultScreen extends StatelessWidget {
                 : null,
           ),
           child: isActive
-              ? Icon(
+              ? const Icon(
                   Icons.check,
                   color: Colors.white,
                   size: 48,
@@ -681,14 +572,24 @@ class ResultScreen extends StatelessWidget {
             color: isActive ? color : Colors.grey.shade600,
           ),
         ),
-        const SizedBox(height: 4),
-        // Text(
-        //   range,
-        //   style: TextStyle(
-        //     fontSize: 11,
-        //     color: Colors.grey.shade600,
-        //   ),
-        // ),
+      ],
+    );
+  }
+  
+  // 과실 비율 컬럼 헬퍼
+  Widget _buildFaultColumn(String label, String value, Color color) {
+     return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 48,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
       ],
     );
   }

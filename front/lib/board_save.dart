@@ -1,13 +1,25 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http; // http 패키지 추가
 
 class BoardSaveScreen extends StatefulWidget {
+  // UI에 보여줄 데이터
   final String analysisContent;
   final int postId;
+
+  // ⭐ [기능 추가] 백엔드 전송용 숨겨진 데이터 (UI엔 영향 없음)
+  final String faultRatio;
+  final String legalBasis;
+  final String accidentInfo;
 
   const BoardSaveScreen({
     super.key,
     required this.analysisContent,
     required this.postId,
+    // 생성자에서 데이터 받기
+    required this.faultRatio,
+    required this.legalBasis,
+    required this.accidentInfo,
   });
 
   @override
@@ -24,10 +36,20 @@ class _BoardSaveScreenState extends State<BoardSaveScreen> {
     super.dispose();
   }
 
+  // ⭐ [기능 수정] 실제 서버 저장 로직 구현
   Future<void> _saveToBoard() async {
+    // 1. 비밀번호 입력 확인
     if (_passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('비밀번호를 입력해주세요')),
+      );
+      return;
+    }
+
+    // 2. 비밀번호 길이 확인 (백엔드 제약: 4자리 숫자)
+    if (_passwordController.text.length != 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호는 4자리 숫자여야 합니다')),
       );
       return;
     }
@@ -37,31 +59,45 @@ class _BoardSaveScreenState extends State<BoardSaveScreen> {
     });
 
     try {
-      // ⭐ 백엔드 API 호출 (여기에 서버 연동 코드 추가)
-      // 예시:
-      // final response = await http.post(
-      //   Uri.parse('http://your-server.com/api/board/save'),
-      //   headers: {'Content-Type': 'application/json'},
-      //   body: jsonEncode({
-      //     'post_id': widget.postId,
-      //     'password': _passwordController.text,
-      //     'content': widget.analysisContent,
-      //   }),
-      // );
+      // 3. 백엔드 URL 설정
+      final url = Uri.parse('https://chatbot-backend-599050237852.asia-northeast3.run.app/board');
 
-      // 임시로 로컬 저장 시뮬레이션
-      await Future.delayed(const Duration(seconds: 1));
+      // 4. 제목 자동 생성 (UI에 입력창이 없으므로 자동 생성)
+      final String autoTitle = '${DateTime.now().toString().substring(0, 10)} 교통사고 분석 리포트';
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('게시글이 저장되었습니다')),
-        );
+      // 5. 데이터 패키징 (백엔드 규격 준수)
+      final Map<String, dynamic> requestBody = {
+        "board_password": _passwordController.text,
+        "accident_title": autoTitle,              // 자동 생성 제목
+        "accident_info": widget.accidentInfo,     // 넘겨받은 사고 정황
+        "fault_ratio": widget.faultRatio,         // 넘겨받은 과실 비율
+        "analysis_result": widget.analysisContent,// 넘겨받은 분석 결과
+        "legal_basis": widget.legalBasis,         // 넘겨받은 법적 근거
+        "accident_summary": widget.analysisContent.length > 50 
+            ? "${widget.analysisContent.substring(0, 50)}..." 
+            : widget.analysisContent
+      };
 
-        // 3초 후 이전 화면으로 돌아가기
-        await Future.delayed(const Duration(seconds: 2));
+      // 6. 전송
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
         if (mounted) {
-          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('게시글이 저장되었습니다')),
+          );
+
+          await Future.delayed(const Duration(seconds: 1));
+          if (mounted) {
+            Navigator.pop(context);
+          }
         }
+      } else {
+        throw Exception('서버 오류: ${response.statusCode}');
       }
     } catch (e) {
       if (mounted) {
@@ -70,12 +106,15 @@ class _BoardSaveScreenState extends State<BoardSaveScreen> {
         );
       }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
+  // --- 아래 UI 코드는 업로드해주신 원본과 100% 동일합니다 ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
