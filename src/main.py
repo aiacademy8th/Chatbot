@@ -14,16 +14,28 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime
+from pydantic import BaseModel          # 데이터 검증을 위한 Pydantic import
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-
 # 모듈 import
 # from STT.google_stt_handler import GoogleSTTHandler       # 기능 제외로 주석 처리
 from src.LangGraphScripts.AccidentGraph import agent_instance, chat_agent_instance
+
+# --------------------------------------------
+# 게시판 저장 데이터 모델 정의
+# --------------------------------------------
+class BoardEntry(BaseModel):
+    board_password: str         # 비밀번호 4자리
+    accident_title: str         # 사고 장소 (게시글 제목)
+    accident_info: str          # 사고 정황
+    fault_ratio: str            # 과실 비율
+    analysis_result: str        # 분석 결과
+    legal_basis: str            # 법적 근거
+    accident_summary: str       # 최종 답변 요약
+
 
 # Lifespan(수명 주기) 관리
 @asynccontextmanager
@@ -65,6 +77,52 @@ app.add_middleware(
 # 임시 저장소 설정
 TEMP_DIR = "temp_uploads"
 os.makedirs(TEMP_DIR, exist_ok=True)
+
+# --------------------------------------------
+# 게시판 저장 엔드포인트
+# --------------------------------------------
+@app.post("/board")
+async def save_to_board(entry: BoardEntry):
+    """
+    사고 분석 결과를 게시판에 저장합니다.
+    - accodent_title: UI에서 입력받은 사고 장소를 제목으로 사용합니다.
+    """
+
+    # 비밀번호 형식 검증 (4자리 숫자)
+    if len(entry.board_password) != 4 or not entry.board_password.isdigit():
+        raise HTTPException(status_code=400, detail="비밀번호를 숫자 4자리여야 합니다.")
+    
+    try:
+        # lifepsan에서 생성된 pool 사용
+        if not agent_instance.pool:
+            raise HTTPException(status_code=500, detail="데이터베이스 연결이 초기화되지 않았습니다.")
+
+        async with agent_instance.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                insert_query = """
+                INSERT INTO accident_board (
+                    board_password, accident_title, accident_info,
+                    fault_ratio, analysis_result, legal_basis, accident_summary
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """
+
+                await cur.execute(insert_query, (
+                    entry.board_password,
+                    entry.accident_title,
+                    entry.accident_info,
+                    entry.fault_ratio,
+                    entry.analysis_result,
+                    entry.legal_basis,
+                    entry.accident_summary
+                ))
+                await conn.commit()
+
+                logger.info(f"게시글 저장 완료: {entry.accident_title}")
+                return {"status": "success", "message": "성공적으로 저장되었습니다."}
+
+    except Exception as e:
+        logger.error(f"게시판 저장 오류: {e}")
+        raise HTTPException(status_code=500, detail="DB 저장 중 오류가 발생했습니다.")
 
 @app.post("/analyze")
 async def analyze_accident(
