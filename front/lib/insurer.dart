@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'photo.dart';  // ⭐ 추가: photo.dart import
+import 'dart:ui';
 
 class InsurerScreen extends StatelessWidget {
   const InsurerScreen({super.key});
@@ -70,87 +71,113 @@ Future<void> _makePhoneCallAndNavigate(
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          '보험사 연결',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
+      // 연두색 배경
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color.fromARGB(255, 255, 255, 255),
+              const Color.fromARGB(255, 202, 216, 202),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 안내 문구
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: const Row(
+        padding: const EdgeInsets.all(16),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 앱바 대체 영역 (뒤로가기 + 제목)
+              Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '보험사를 선택하시면 바로 전화 연결됩니다.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.black87,
-                      ),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '보험사 연결',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 20),
-            
-            // 보험사 리스트
-            Expanded(
-              child: ListView.builder(
-                itemCount: insurers.length,
-                itemBuilder: (context, index) {
-                  final insurer = insurers[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: InsurerButton(
-                      name: insurer['name']!,
-                      phone: insurer['phone']!,
-                      onPressed: () => _makePhoneCallAndNavigate(
-                        context,
-                        insurer['phone']!,
-                        insurer['name']!,
-                      ),  // ⭐ 수정: 보험사 이름도 전달
+              const SizedBox(height: 20),
+
+              // 안내 문구
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withOpacity(0.4)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.white.withOpacity(0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
-                  );
-                },
+                  ],
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Color.fromARGB(255, 0, 0, 0)),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '보험사를 선택하시면 바로 전화 연결됩니다.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Color.fromARGB(255, 0, 0, 0),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+
+              // 보험사 리스트
+              Expanded(
+                child: ListView.builder(
+                  itemCount: insurers.length,
+                  itemBuilder: (context, index) {
+                    final insurer = insurers[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: GlassInsurerButton(
+                        name: insurer['name']!,
+                        phone: insurer['phone']!,
+                        onPressed: () => _makePhoneCallAndNavigate(
+                          context,
+                          insurer['phone']!,
+                          insurer['name']!,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// 보험사 버튼 위젯
-class InsurerButton extends StatelessWidget {
+class GlassInsurerButton extends StatelessWidget {
   final String name;
   final String phone;
   final VoidCallback onPressed;
 
-  const InsurerButton({
+  const GlassInsurerButton({
     super.key,
     required this.name,
     required this.phone,
@@ -159,84 +186,84 @@ class InsurerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      // height: 80,
-      constraints: const BoxConstraints(minHeight: 80),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.2),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.4)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.green.shade700.withOpacity(0.2),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black87,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey.shade300),
+          child: ElevatedButton(
+            onPressed: onPressed,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              foregroundColor: Colors.black87,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.business,
+                    color: Colors.green.shade700,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        phone,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.phone,
+                  color: Colors.green.shade700,
+                  size: 28,
+                ),
+              ],
+            ),
           ),
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        ),
-        child: Row(
-          children: [
-            // 보험사 아이콘
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.business,
-                color: Colors.green.shade700,
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 16),
-            
-            // 보험사 이름과 전화번호
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    phone,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // 전화 아이콘
-            Icon(
-              Icons.phone,
-              color: Colors.green.shade700,
-              size: 28,
-            ),
-          ],
         ),
       ),
     );
