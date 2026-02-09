@@ -10,10 +10,14 @@ bool _chatStarted = false;
 
 class ChatbotScreen extends StatefulWidget {
   final List<XFile> accidentPhotos;
+  final String? threadId; // Optional thread ID for continuing conversation
+  final bool initialChatMode; // Flag to indicate starting directly in chat mode
 
   const ChatbotScreen({
     super.key,
     required this.accidentPhotos,
+    this.threadId,
+    this.initialChatMode = false,
   });
 
   @override
@@ -110,12 +114,21 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 void initState() {
   super.initState();
   
-  // 딱 한 번만 실행되도록 보장
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_messages.isEmpty) {
-      _startChat();
-    }
-  });
+  // 만약 초기 채팅 모드로 진입하면
+  if (widget.initialChatMode && widget.threadId != null) {
+    _currentThreadId = widget.threadId;
+    _inChatMode = true;
+    _chatStarted = true; // 채팅이 시작되었음을 표시하여 초기 설문 방지
+    _addBotMessage('분석 결과를 바탕으로 추가 질문을 해주세요! 🤔');
+    // _currentStep은 0으로 유지되어야 함 (질문 흐름을 타지 않으므로)
+  } else {
+    // 딱 한 번만 실행되도록 보장 (기존 설문 흐름)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_messages.isEmpty) {
+        _startChat();
+      }
+    });
+  }
 }
 
 void _startChat() {
@@ -383,13 +396,12 @@ List<Map<String, String>> _getRagReferences() {
       final response = await http.post(
         url,
         headers: {
-          'Content-Type': 'application/json', // JSON으로 변경
           'Accept': 'application/json; charset=utf-8',
         },
-        body: jsonEncode({ // 데이터를 JSON 문자열로 변환
+        body: { // 데이터를 폼 데이터로 변환
           'thread_id': threadId,
           'user_message': userMessage,
-        }),
+        },
       );
 
       if (response.statusCode == 200) {

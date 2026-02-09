@@ -521,6 +521,8 @@ class ResultScreen extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (context) => ChatbotScreen(
                               accidentPhotos: const [], // chat.dart에 정의된 ChatbotScreen은 accidentPhotos를 필수로 받음
+                              threadId: threadId,
+                              initialChatMode: true,
                             ),
                           ),
                         );
