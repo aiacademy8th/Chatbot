@@ -49,11 +49,15 @@ class _BoardViewScreenState extends State<BoardViewScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         setState(() {
-          _postData = data is Map<String, dynamic> ? data : {};
+          // 'data' 필드 안에 실제 내용이 들어있음
+          if (data['status'] == 'success' && data['data'] != null) {
+            _postData = data['data'];
+          } else {
+            _postData = {};
+          }
           _isLoading = false;
         });
       } else {
-        final errorBody = utf8.decode(response.bodyBytes);
         setState(() {
           _error = response.statusCode == 403 || response.statusCode == 401
               ? '비밀번호가 일치하지 않습니다 🔒'
@@ -151,14 +155,24 @@ class _BoardViewScreenState extends State<BoardViewScreen> {
   }
 
   Widget _buildDetailView() {
+    if (_postData == null || _postData!.isEmpty) {
+      return const Center(child: Text("데이터를 불러올 수 없습니다."));
+    }
+
     final data = _postData!;
-    final title = data['accident_title'] ?? data['title'] ?? '제목 없음';
-    final date = _formatDate(data['created_at'] ?? data['date'] ?? '');
-    final accidentInfo = data['accident_info'] ?? '';
-    final faultRatio = data['fault_ratio'] ?? '';
-    final analysisResult = data['analysis_result'] ?? '';
-    final legalBasis = data['legal_basis'] ?? '';
-    final accidentSummary = data['accident_summary'] ?? '';
+    
+    // ⭐ [수정된 부분] 백엔드 main.py의 키 이름과 일치시켰습니다.
+    // 백엔드 키: title, info, fault, result, legal, summary
+    final title = data['title'] ?? data['accident_title'] ?? '제목 없음';
+    final date = _formatDate(data['date'] ?? data['created_at'] ?? '');
+    
+    // 여기가 문제였습니다. 백엔드는 'info'로 보내는데 프론트는 'accident_info'를 찾고 있었습니다.
+    // 두 가지 경우를 모두 체크하도록 수정했습니다.
+    final accidentInfo = data['info'] ?? data['accident_info'] ?? '';
+    final faultRatio = data['fault'] ?? data['fault_ratio'] ?? '';
+    final analysisResult = data['result'] ?? data['analysis_result'] ?? '';
+    final legalBasis = data['legal'] ?? data['legal_basis'] ?? '';
+    final accidentSummary = data['summary'] ?? data['accident_summary'] ?? '';
 
     return SingleChildScrollView(
       child: Column(
