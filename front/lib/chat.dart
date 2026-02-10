@@ -180,7 +180,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   Future<void> _analyzeWithGPT() async {
     _addBotMessage('입력하신 정보를 분석 중입니다... 🤔');
-
     if (!mounted) return;
 
     setState(() {
@@ -215,6 +214,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         setState(() {
           _isLoading = false;
         });
+        
         _addBotMessage('죄송합니다. 분석 중 오류가 발생했습니다.\n오류: ${e.toString()}');
       }
     }
@@ -1245,16 +1245,16 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           GestureDetector(
             onTap: () async {
               final text = _textController.text.trim();
-              _addUserMessage(text.isNotEmpty ? text : '(입력 없음)');
               _textController.clear();
 
               if (_inChatMode && _currentThreadId != null) {
+                _addUserMessage(text.isNotEmpty ? text : '(입력 없음)');
                 await _callBackendChat(_currentThreadId!, text);
               } else {
                 _handleAnswer(
                   _questions[_currentStep].id,
                   text,
-                  text,
+                  text.isNotEmpty ? text : '(입력 없음)',
                 );
               }
             },
