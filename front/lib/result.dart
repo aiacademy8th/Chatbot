@@ -7,9 +7,10 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'board_save.dart';
+import 'board_list.dart';
 import 'chat.dart';
 
-class ResultScreen extends StatelessWidget {
+class ResultScreen extends StatefulWidget {
   final Map<String, dynamic> analysisResult;
   final Map<String, dynamic> userAnswers;
   final String threadId;
@@ -20,6 +21,13 @@ class ResultScreen extends StatelessWidget {
     required this.userAnswers,
     required this.threadId,
   });
+
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  bool _isSavedToBoard = false;
 
   int _generatePostId() {
     return DateTime.now().microsecond % 1000000 + 1;
@@ -75,63 +83,126 @@ class ResultScreen extends StatelessWidget {
   }
 
   Future<void> _generatePDF(BuildContext context) async {
-    try {
-      final fontData = await rootBundle.load('assets/fonts/NotoSansKR-Regular.ttf');
-      final ttf = pw.Font.ttf(fontData);
-      final pdfTheme = pw.ThemeData.withFont(base: ttf, bold: ttf);
+    final fontData = await rootBundle.load('assets/fonts/NotoSansKR-Regular.ttf');
+    final ttf = pw.Font.ttf(fontData);
+    final pdfTheme = pw.ThemeData.withFont(base: ttf);
 
-      final pdf = pw.Document(theme: pdfTheme);
+    final pdf = pw.Document(theme: pdfTheme);
 
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          build: (pw.Context context) {
-            return [
-              pw.Header(
-                level: 0,
-                child: pw.Text(
-                  '교통사고 과실 비율 분석 결과',
-                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          return [
+            pw.Header(
+              level: 0,
+              child: pw.Text(
+                '교통사고 과실 비율 분석 결과',
+                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              '분석 일시: ${DateTime.now().toString().substring(0, 19)}',
+              style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
+            ),
+            pw.SizedBox(height: 30),
+            pw.Header(level: 1, text: '사고 정보'),
+            pw.SizedBox(height: 10),
+            ...widget.userAnswers.entries.map((entry) {
+              return pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 8),
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.SizedBox(
+                      width: 150,
+                      child: pw.Text('${entry.key}:',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Expanded(child: pw.Text('${entry.value}')),
+                  ],
                 ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                '분석 일시: ${DateTime.now().toString().substring(0, 19)}',
-                style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
-              ),
-              pw.SizedBox(height: 30),
-              pw.Header(level: 1, text: '사고 정보'),
+              );
+            }).toList(),
+            pw.SizedBox(height: 30),
+            pw.Header(level: 1, text: '분석 결과'),
+            pw.SizedBox(height: 10),
+            pw.Text(
+              widget.analysisResult['analysis'] ?? '분석 결과가 없습니다.',
+              style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
+            ),
+            pw.SizedBox(height: 30),
+            if (widget.analysisResult['references'] != null) ...[
+              pw.Header(level: 1, text: '참고 자료'),
               pw.SizedBox(height: 10),
-              ...userAnswers.entries.map((entry) {
+              ...((widget.analysisResult['references'] as List).map((ref) {
                 return pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 8),
-                  child: pw.Row(
+                  padding: const pw.EdgeInsets.only(bottom: 12),
+                  child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.SizedBox(
-                        width: 150,
-                        child: pw.Text('${entry.key}:',
-                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.Text('• ${ref['source']}',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.only(left: 12, top: 4),
+                        child: pw.Text(ref['content'],
+                            style: const pw.TextStyle(fontSize: 11)),
                       ),
-                      pw.Expanded(child: pw.Text('${entry.value}')),
                     ],
                   ),
                 );
-              }).toList(),
-              pw.SizedBox(height: 30),
-              pw.Header(level: 1, text: '분석 결과'),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                analysisResult['result']?['reasoning'] ?? analysisResult['analysis'] ?? '분석 결과 없음',
-                style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
+              }).toList()),
+            ],
+            pw.SizedBox(height: 30),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(16),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey400),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
               ),
-            ];
-          },
-        ),
-      );
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('주의사항',
+                      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    '본 분석 결과는 AI 기반 예측이며, 실제 보험사 또는 법원의 판단과 다를 수 있습니다.',
+                    style: const pw.TextStyle(fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ];
+        },
+      ),
+    );
 
-      await Printing.sharePdf(bytes: await pdf.save(), filename: 'accident_analysis.pdf');
+    try {
+      final output = await getDownloadsDirectory();
+      final fileName = 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final file = File('${output!.path}/$fileName');
+      await file.writeAsBytes(await pdf.save());
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF 저장 완료: ${file.path}'),
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: '공유',
+              onPressed: () async {
+                await Printing.sharePdf(
+                  bytes: await pdf.save(),
+                  filename: 'accident_analysis.pdf',
+                );
+              },
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -144,7 +215,7 @@ class ResultScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Map<String, dynamic> actualAnalysisData =
-        analysisResult['result'] as Map<String, dynamic>? ?? {};
+        widget.analysisResult['result'] as Map<String, dynamic>? ?? {};
 
     final faultRatio = actualAnalysisData['fault_ratio'] as Map<String, dynamic>? ??
         {'me': 50, 'opponent': 50};
@@ -155,7 +226,7 @@ class ResultScreen extends StatelessWidget {
     final actionGradient = _getActionGradient(recommendedAction);
     final actionColor = _getActionColor(recommendedAction);
 
-    final analysisText = actualAnalysisData['reasoning'] ?? actualAnalysisData['analysis'] ?? '분석 결과가 없습니다.';
+    final analysisText = actualAnalysisData['reasoning'] ?? '분석 결과가 없습니다.';
     final referencesList = actualAnalysisData['legal_basis'] as List? ?? [];
 
     return Scaffold(
@@ -189,7 +260,13 @@ class ResultScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(8),
             child: GestureDetector(
-              onTap: () => _generatePDF(context),
+              onTap: () async {
+                final pdf = pw.Document();
+                await Printing.sharePdf(
+                  bytes: await pdf.save(),
+                  filename: 'accident_analysis.pdf',
+                );
+              },
               child: Container(
                 width: 34,
                 height: 34,
@@ -438,7 +515,7 @@ class ResultScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      ...referencesList.map((ref) {
+                      ...(referencesList).map((ref) {
                         final referenceMap = ref is Map<String, dynamic>
                             ? ref
                             : {'source': ref.toString(), 'content': ''};
@@ -536,7 +613,7 @@ class ResultScreen extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (context) => ChatbotScreen(
                               accidentPhotos: const [],
-                              threadId: threadId,
+                              threadId: widget.threadId,
                               initialChatMode: true,
                             ),
                           ),
@@ -577,52 +654,61 @@ class ResultScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
 
-                  // ⭐ [수정된 부분] 게시판 저장
+                  // 게시판 저장 / 보기
                   Expanded(
                     child: GestureDetector(
                       onTap: () async {
-                        final text = analysisText;
-                        Clipboard.setData(ClipboardData(text: text));
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('분석 내용이 복사되었습니다'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-
-                        await Future.delayed(const Duration(seconds: 1));
-
-                        if (context.mounted) {
-                          Navigator.push(
+                        if (_isSavedToBoard) {
+                          // 저장 완료 → 게시판 목록으로 (뒤로가기 시 홈으로)
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const BoardListScreen(),
+                            ),
+                            (route) => route.isFirst,
+                          );
+                        } else {
+                          // 아직 저장 안 함 → 게시판 저장으로
+                          final result = await Navigator.push<bool>(
                             context,
                             MaterialPageRoute(
                               builder: (context) => BoardSaveScreen(
-                                analysisContent: text,
+                                analysisContent: analysisText,
                                 postId: _generatePostId(),
-                                // ▼▼▼ [중요] 개별 파라미터가 아닌 Map 통째로 전달
-                                fullResult: analysisResult, 
-                                userAnswers: userAnswers,
+                                fullResult: widget.analysisResult,
+                                userAnswers: widget.userAnswers,
                               ),
                             ),
                           );
+
+                          if (result == true && mounted) {
+                            setState(() {
+                              _isSavedToBoard = true;
+                            });
+                          }
                         }
                       },
                       child: Container(
                         height: 54,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: _isSavedToBoard ? const Color(0xFFE3F2FD) : Colors.white,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFBBDEFB), width: 1.5),
+                          border: Border.all(
+                            color: const Color(0xFFBBDEFB),
+                            width: 1.5,
+                          ),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            Text('📋', style: TextStyle(fontSize: 17)),
-                            SizedBox(width: 5),
+                          children: [
                             Text(
-                              '게시판',
-                              style: TextStyle(
+                              _isSavedToBoard ? '📄' : '📋',
+                              style: const TextStyle(fontSize: 17),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _isSavedToBoard ? '게시판 보기' : '게시판',
+                              style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFF1E88E5),
