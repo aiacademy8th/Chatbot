@@ -70,7 +70,15 @@ dev_dependencies:
 flutter:
   assets:
     - assets/fonts/NotoSansKR-Regular.ttf
+    - assets/fonts/NotoSansKR-Bold.ttf
     - .env
+
+  fonts:                                      # ← 추가
+    - family: NotoSansKR
+      fonts:
+        - asset: assets/fonts/NotoSansKR-Regular.ttf
+        - asset: assets/fonts/NotoSansKR-Bold.ttf
+          weight: 700
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

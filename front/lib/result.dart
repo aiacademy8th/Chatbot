@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'board_save.dart';
 import 'board_list.dart';
 import 'chat.dart';
@@ -83,9 +84,17 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   Future<void> _generatePDF(BuildContext context) async {
+    // ── 데이터 추출 (build 메서드와 동일한 키 참조) ──
+    final Map<String, dynamic> actualAnalysisData =
+        widget.analysisResult['result'] as Map<String, dynamic>? ?? {};
+    final analysisText = actualAnalysisData['reasoning'] ?? '분석 결과가 없습니다.';
+    final referencesList = actualAnalysisData['legal_basis'] as List? ?? [];
+
     final fontData = await rootBundle.load('assets/fonts/NotoSansKR-Regular.ttf');
+    final boldFontData = await rootBundle.load('assets/fonts/NotoSansKR-Bold.ttf');
     final ttf = pw.Font.ttf(fontData);
-    final pdfTheme = pw.ThemeData.withFont(base: ttf);
+    final boldTtf = pw.Font.ttf(boldFontData);
+    final pdfTheme = pw.ThemeData.withFont(base: ttf, bold: boldTtf);
 
     final pdf = pw.Document(theme: pdfTheme);
 
@@ -95,12 +104,13 @@ class _ResultScreenState extends State<ResultScreen> {
         margin: const pw.EdgeInsets.all(32),
         build: (pw.Context context) {
           return [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                '교통사고 과실 비율 분석 결과',
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
-              ),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('교통사고 과실 비율 분석 결과',
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, font: boldTtf)),
+                pw.Divider(thickness: 1),
+              ],
             ),
             pw.SizedBox(height: 20),
             pw.Text(
@@ -108,7 +118,7 @@ class _ResultScreenState extends State<ResultScreen> {
               style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700),
             ),
             pw.SizedBox(height: 30),
-            pw.Header(level: 1, text: '사고 정보'),
+            pw.Text('사고 정보', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: boldTtf)),
             pw.SizedBox(height: 10),
             ...widget.userAnswers.entries.map((entry) {
               return pw.Padding(
@@ -127,29 +137,33 @@ class _ResultScreenState extends State<ResultScreen> {
               );
             }).toList(),
             pw.SizedBox(height: 30),
-            pw.Header(level: 1, text: '분석 결과'),
+            pw.Text('분석 결과', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: boldTtf)),
             pw.SizedBox(height: 10),
             pw.Text(
-              widget.analysisResult['analysis'] ?? '분석 결과가 없습니다.',
+              analysisText,
               style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.5),
             ),
             pw.SizedBox(height: 30),
-            if (widget.analysisResult['references'] != null) ...[
-              pw.Header(level: 1, text: '참고 자료'),
+            if (referencesList.isNotEmpty) ...[
+              pw.Text('참고 자료', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: boldTtf)),
               pw.SizedBox(height: 10),
-              ...((widget.analysisResult['references'] as List).map((ref) {
+              ...(referencesList.map((ref) {
+                final referenceMap = ref is Map<String, dynamic>
+                    ? ref
+                    : {'source': ref.toString(), 'content': ''};
                 return pw.Padding(
                   padding: const pw.EdgeInsets.only(bottom: 12),
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('• ${ref['source']}',
+                      pw.Text('• ${referenceMap['source'] ?? '출처 미상'}',
                           style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.only(left: 12, top: 4),
-                        child: pw.Text(ref['content'],
-                            style: const pw.TextStyle(fontSize: 11)),
-                      ),
+                      if ((referenceMap['content'] ?? '').isNotEmpty)
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(left: 12, top: 4),
+                          child: pw.Text(referenceMap['content'] ?? '',
+                              style: const pw.TextStyle(fontSize: 11)),
+                        ),
                     ],
                   ),
                 );
@@ -181,26 +195,39 @@ class _ResultScreenState extends State<ResultScreen> {
     );
 
     try {
-      final output = await getDownloadsDirectory();
-      final fileName = 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final file = File('${output!.path}/$fileName');
-      await file.writeAsBytes(await pdf.save());
+      final Uint8List bytes = await pdf.save();
+
+      if (kIsWeb) {
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        );
+      } else {
+        final output = await getDownloadsDirectory();
+        final fileName = 'accident_analysis_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        final file = File('${output!.path}/$fileName');
+        await file.writeAsBytes(bytes);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('PDF 저장 완료: ${file.path}'),
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: '공유',
+                onPressed: () async {
+                  await Printing.sharePdf(bytes: bytes, filename: fileName);
+                },
+              ),
+            ),
+          );
+        }
+        return;
+      }
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('PDF 저장 완료: ${file.path}'),
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: '공유',
-              onPressed: () async {
-                await Printing.sharePdf(
-                  bytes: await pdf.save(),
-                  filename: 'accident_analysis.pdf',
-                );
-              },
-            ),
-          ),
+          const SnackBar(content: Text('PDF 생성 완료'), duration: Duration(seconds: 2)),
         );
       }
     } catch (e) {
