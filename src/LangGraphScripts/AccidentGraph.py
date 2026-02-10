@@ -122,7 +122,7 @@ class AccidentGraphAgent:
         self.workflow.set_entry_point("supervisor")
 
         # 슈퍼바이저 -> 각 툴 (Fan-out: 병렬 실행)
-        # 주의: LangGraph 기본 동작은 순차 실행이며, 진정항 병렬 실행을 위해서는 Send API 사용 필요
+        # 주의: LangGraph 기본 동작은 순차 실행이며, 진정한 병렬 실행을 위해서는 Send API 사용 필요
         self.workflow.add_conditional_edges(
             "supervisor",
             self._route_tools,              # 라우팅 함수
@@ -296,7 +296,7 @@ class AccidentGraphAgent:
         issues = []
 
         # 실패 키워드 확장
-        FAILURE_KEYWORDS = ["오류", "실패", "없습니다.", "처리에 실퍄"]
+        FAILURE_KEYWORDS = ["오류", "실패", "없습니다.", "처리에 실패"]
 
         if any(keyword in img_summary for keyword in FAILURE_KEYWORDS):
             issues.append("Vision 워커 실패")
@@ -395,7 +395,7 @@ class AccidentChatAgent:
     """
     교통사고 후속 질문 챗봇 Agent
     - 기존 분석 결과를 컨텍스트로 활용
-    - 추기 질문에 대해 RAG 재검색
+    - 추가 질문에 대해 RAG 재검색
     - 스트리밍 응답 지원
     """
 
@@ -430,7 +430,7 @@ class AccidentChatAgent:
         self.workflow.add_edge("search_additional", "generate_response")
 
         # 응답 생성 후 종료
-        self.workflow.add_edge("search_additional", END)
+        self.workflow.add_edge("generate_response", END)
 
     async def setup(self):
         """리소스 설정 (기존 Agent와 동일한 DB 공유)"""
@@ -469,7 +469,7 @@ class AccidentChatAgent:
         """
         logger.info("[ChatAgent] 컨텍스트 로드 시작")
 
-        # 이미 state에 컨텍스트가 있다면 그래도 사용 (초기 주입)
+        # 이미 state에 컨텍스트가 있다면 그대로 사용 (초기 주입)
         if state.get("accident_context"):
             logger.info("[ChatAgent] 컨텍스트가 이미 존재 (스킵)")
             return {}
@@ -524,29 +524,72 @@ class AccidentChatAgent:
     async def generate_response_node(self, state: ChatState) -> dict:
         """
         [Node 3] 최종 응답 생성
-        - 모든 컨텍스트를 종합하여 답변
+        - 현재 상담 단계(current_stage) 내부 자동 판별
+        - 이전 분석 결과(과실 비율 + 판례)를 컨텍스트로 활용
         """
 
         try:
+            # --- [내부 단계 판별] 사용자 메시지 키워드 기반 자동 분류 ---
+            last_human = next(
+                (m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+                ""
+            )
+
+            # 단계 판별 (statement_writing > case_confirmation > clarification)
+            if any(kw in last_human for kw in ["진술서", "요약", "정리", "작성", "사고경위서", "보고서"]):
+                current_stage = "statement_writing"
+            elif any(kw in last_human for kw in ["과실", "비율", "판례", "합의", "보험", "보상", "책임", "할증"]):
+                current_stage = "case_confirmation"
+            else:
+                current_stage = "clarification"
+            
+            logger.info(f"[ChatAgent] 상담 단계 판별: {current_stage}")
+
+            # --- {rag_result} 조립 ---\
+            rag_result_parts = []
+
+            accident_ctx = state.get("accident_context", "")
+            if accident_ctx:
+                rag_result_parts.append(f"[사고 상황 요약]\n{accident_ctx}")
+
+            vision_ctx = state.get("vision_summary", "")
+            if vision_ctx:
+                rag_result_parts.append(f"[현장 이미지 분석 결과]\n{vision_ctx}")
+
+            fault_ctx = state.get("fault_analysis", "")
+            if fault_ctx:
+                rag_result_parts.append(f"[초기 과실 비율 판단]\n{fault_ctx}")
+
+            initial_rag_ctx = state.get("initial_rag", "")
+            if initial_rag_ctx:
+                rag_result_parts.append(f"[초기 참조 판례]\n{initial_rag_ctx}")
+
+            additional_rag_ctx = state.get("additional_rag", "")
+            if additional_rag_ctx:
+                rag_result_parts.append(f"[추가 검색된 관련 판례]\n{additional_rag_ctx}")
+
+            rag_result = "\n\n".join(rag_result_parts) if rag_result_parts else "분석 결과 정보 없음"
+
             # 시스템 프롬프트 구성
             system_prompt = f"""
-            당신은 교통사고 법률 상담 전문가입니다.
-            다음 정보를 바탕으로 사용자의 질문에 정확하고 친절하게 답변하세요.
+            당신은 교통사고 전문 상담 AI입니다.
 
-            [사고 상황 요약]
-            {state.get('accident_context', '정보 없음')}
-            
-            [현장 이미지 분석 결과]
-            {state.get('vision_summary'), '정보 없음'}
+            [이전 분석 결과]
+            {rag_result}
 
-            [초기 과실 비율 판단]
-            {state.get('fault_analysis', '정보 없음')}
+            위 분석 결과를 바탕으로 사용자의 추가 질문에 답변합니다.
+            답변 시 다음 사항을 준수하세요:
+            1. 상위로 분석된 과실 비율과 판례 3가지 케이스를 바탕으로 답변
+            2. 사용자가 이해하기 쉬운 용어 사용
+            3. 필요시 추가 정보 요청
 
-            [초기 참조 판례]
-            {state.get('initial_rag', '정보 없음')}
+            현재 단계: {current_stage}
+            - clarification: 사고 상황 명확화 질문
+            - case_confirmation: 판례 확정을 위한 질문
+            - statement_writing: 진술서 및 사고 요약 작성 안내
 
-            [추가 검색된 관련 판례]
-            {state.get('additional_rag'), '정보 없음'}
+            [단계별 상세 지침]
+            {self._get_stage_instruction(current_stage)}
 
             [답변 지침]
             1. 사용자의 질문에 직접적으로 답변하세요.
@@ -578,6 +621,29 @@ class AccidentChatAgent:
                 "response": fallback_response,
                 "messages": [AIMessage(content=fallback_response)]
             }
+        
+    def _get_stage_instruction(self, stage: str) -> str:
+        """단계별 상세 응답 지침 반환"""
+        instructions = {
+            "clarification": (
+                "- 사고 상황이 불명확한 부분이 있다면 구체적으로 질문하세요.\n"
+                "- 예: \"사고 당시 신호등 상태는 어땠나요?\", \"상대 차량의 진행 방향을 알 수 있나요?\"\n"
+                "- 충분한 정보가 이미 있다면, 분석 결과를 바탕으로 직접 답변하세요."
+            ),
+            "case_confirmation": (
+                "- 이전 분석에서 산정된 과실 비율과 판례를 근거로 답변하세요.\n"
+                "- 과실 비율이 달라질 수 있는 핵심 변수(속도, 신호, 진입 시점 등)를 안내하세요.\n"
+                "- 합의/보험 처리 시 주의사항 등 실질적 조언을 제공하세요.\n"
+                "- \"판례에 따르면...\" 형태로 근거를 명시하세요."
+            ),
+            "statement_writing": (
+                "- 진술서 또는 사고 요약문 작성을 안내하세요.\n"
+                "- 육하원칙(언제, 어디서, 누가, 무엇을, 어떻게, 왜) 형식으로 구성을 잡아주세요.\n"
+                "- 사용자에게 유리한 표현과 불리한 표현을 구분하여 조언하세요.\n"
+                "- 사실 관계를 왜곡하지 않도록 주의하세요."
+            ),
+        }
+        return instructions.get(stage, instructions["clarification"])
 
     async def run(self, initial_state: dict, config: dict = None) -> dict:
         """그래프 실행 헬퍼"""

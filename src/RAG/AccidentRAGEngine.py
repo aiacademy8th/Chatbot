@@ -31,7 +31,13 @@ class FaultRatio(BaseModel):
     opponent: int = Field(description="상대방의 과실 비율 (0~100)")
 
 class AccidentAnalysisResult(BaseModel):
-    summary: str = Field(description="사고 상황을 3문장 이내로 명확하게 요약")
+    summary: str = Field(
+        description=(
+            "육하원칙(언제, 어디서, 누가, 무엇을, 어떻게, 왜)에 따른 사고 요약문. "
+            "사용자의 사고 설명(HumanMessage)과 Vision AI/RAG 분석 결과(SystemMessage)를 종합하여, "
+            "사고 일시, 장소(도로 유형/차선), A/B차량 정보 및 행동, 충돌 경위, 사고 원인을 포함한 서술형 요약"
+        )
+    )
     fault_ratio: FaultRatio = Field(description="판례와 상황에 기반한 추정 과실 비율")
     legal_basis: List[str] = Field(description="판단의 근거가 된 관련 법규 또는 판례 제목 리스트 (최대 3개)")
     advice: str = Field(description="운전자에 대한 조언")
@@ -564,8 +570,38 @@ class AccidentRAGEngine:
         # 2. 시스템 프롬프트 (페르소나 및 제약조건), [프롬프트 강화] 경미 사고 조언 및 위
         system_prompt_text = """
         당신은 운전자의 이익을 최우선으로 생각하는 '교통사고 대응 전략가'입니다.
-        먼저 **예상 과실 비율(Fault Ratio)**을 산정한 뒤, 이를 기준으로 최적의 대응 전략(action_guide)을 결정하세요
+        먼저 **예상 과실 비율(Fault Ratio)**을 산정한 뒤, 이를 기준으로 최적의 대응 전략(action_guide)을 결정하세요.
         
+        [입력 데이터 구조 안내]
+        - 사용자의 사고 설명: HumanMessage로 전달됩니다.
+        - 현장 시각 정보 요약 (Vision AI 분석): SystemMessage의 "[상황 분석 리포트] > 1. 현장 시각 정보 요약" 항목에 포함됩니다.
+        - 관련 판례 및 법규 (RAG 검색): SystemMessage의 "[상황 분석 리포트] > 2. 관련 판례 및 법규" 항목에 포함됩니다.
+        위 세가지 정보를 종합하여 summary, fault_ratio, advice 등을 생성하세요.
+
+        [summary 작성 형식 - 육하원칙]
+        summary 필드는 반드시 아래 형식을 따르세요. 
+        사용자의 사고 설명(HumanMessage)과 Vision AI/RAG 분석 결과(SystemMessage)를 결합하여 작성합니다.
+        정보가 부족한 항목은 "미상" 또는 "확인 불가"로 표기하되, 전체 서술 흐름을 유지하세요.
+
+        "{사고일시}경 {사고장소}에서 발생한 사고입니다.
+        A차량({내차량정보})은 {방면}에서 {방향}으로 {차선}에서 {행동}하며 이동 중이었습니다.
+        B차량({상대차량정보})은 {방면}에서 {방향}으로 {차선}에서 {행동}하며 이동 중이었습니다.
+        사고는 A차량이 {상세행동} 중 {신호상태}에서 {충돌경위}하여 B차량의 {충돌부위}와 추돌한 것으로 파악됩니다.
+
+        [과실 비율 분석]
+        {AI분석결과요약}
+
+        [관련 판례]
+        {판례정보}"
+
+        [summary 작성 지침]
+        1. 언제: 사고 발생 일시 (정보 없으면 "일시 미상" 표기)
+        2. 어디서: 사고 발생 장소, 도로 유형, 차선 정보 포함
+        3. 누가: A차량(사용자)과 B차량(상대방) 정보
+        4. 무엇을: 각 차량의 행동 (직진, 좌회전, 차선변경 등)
+        5. 어떻게: 충돌 경위 (충돌 부위, 각도 등)
+        6. 왜: 사고 원인 분석 (과실 비율 근거와 연결)
+
         [판단 기준 (action_guide Decision Tree)]
 
         1. **개인 합의 유리 (Personal Settlement Best)**
