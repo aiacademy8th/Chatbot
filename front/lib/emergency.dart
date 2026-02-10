@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:ui';
 import 'photo.dart';
 
 class EmergencyScreen extends StatefulWidget {
@@ -29,10 +28,10 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     if (state == AppLifecycleState.resumed && _justMadeCall) {
       _justMadeCall = false;
-      
+
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
           _showPhotoPrompt(_lastServiceName);
@@ -72,6 +71,8 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
       barrierDismissible: true,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(
             children: [
               Icon(Icons.camera_alt, color: Colors.orange.shade700),
@@ -81,7 +82,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
           ),
           content: Text(
             '$serviceName 통화가 끝나셨나요?\n사고 현장 사진을 촬영하시겠습니까?',
-            style: const TextStyle(fontSize: 16),
+            style: const TextStyle(fontSize: 18),
           ),
           actions: [
             TextButton(
@@ -94,6 +95,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange,
                 foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () {
                 Navigator.pop(dialogContext);
@@ -109,60 +111,119 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _glassButton({required String label, required IconData icon, required VoidCallback onTap, required Color color}) {
-    return SizedBox(
-      width: double.infinity,
-      height: 80,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-          child: InkWell(
-            onTap: onTap,
-            splashColor: Colors.white.withValues(alpha: 0.2),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAFAF8),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        foregroundColor: const Color(0xFF222222),
+        leading: Padding(
+          padding: const EdgeInsets.all(8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: color.withOpacity(0.3),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.2),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                color: const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+              child: const Icon(Icons.arrow_back, size: 18, color: Color(0xFF555555)),
+            ),
+          ),
+        ),
+        title: const Text(
+          '긴급 전화',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF222222),
+          ),
+        ),
+        centerTitle: false,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              // 히어로 카드
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
                 child: Stack(
                   children: [
-                    // 왼쪽 컬러 바
+                    // 장식 blob
                     Positioned(
-                      left: 0,
                       top: 0,
-                      bottom: 0,
+                      right: 0,
                       child: Container(
-                        width: 5,
-                        color: color,
+                        width: 30,
+                        height: 30,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFFEBEE),
+                          shape: BoxShape.circle,
+                        ),
                       ),
                     ),
-                    // 내용
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFFF3E0),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 26,
+                      left: 0,
+                      child: Transform.rotate(
+                        angle: 0.35,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE3F2FD),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 메인 내용
                     Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(icon, size: 32, color: color),
-                          const SizedBox(width: 12),
+                      child: Column(
+                        children: const [
+                          Text('🆘', style: TextStyle(fontSize: 42)),
+                          SizedBox(height: 12),
                           Text(
-                            label,
+                            '긴급 상황인가요?',
                             style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: color,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF222222),
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            '아래 버튼을 눌러 바로 연결하세요',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Color(0xFFAAAAAA),
                             ),
                           ),
                         ],
@@ -171,75 +232,167 @@ class _EmergencyScreenState extends State<EmergencyScreen> with WidgetsBindingOb
                   ],
                 ),
               ),
-            ),
+
+              const Spacer(),
+
+              // 119 버튼
+              _buildEmergencyButton(
+                emoji: '🚒',
+                number: '119',
+                subtitle: '소방 · 구급 · 구조',
+                emojiBgColor: const Color(0xFFFFEBEE),
+                arrowBgColor: const Color(0xFFFFEBEE),
+                arrowIconColor: const Color(0xFFE53935),
+                onTap: () => _makePhoneCall('119', '119'),
+              ),
+
+              const SizedBox(height: 14),
+
+              // 112 버튼
+              _buildEmergencyButton(
+                emoji: '🚔',
+                number: '112',
+                subtitle: '경찰 신고',
+                emojiBgColor: const Color(0xFFE3F2FD),
+                arrowBgColor: const Color(0xFFE3F2FD),
+                arrowIconColor: const Color(0xFF1565C0),
+                onTap: () => _makePhoneCall('112', '112'),
+              ),
+
+              const Spacer(),
+
+              // 하단 팁
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFF0F0F0)),
+                ),
+                child: Row(
+                  children: const [
+                    Text('💡', style: TextStyle(fontSize: 20)),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '팁! ',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF666666),
+                              ),
+                            ),
+                            TextSpan(
+                              text: '부상자가 있다면 119를 먼저 연락하세요',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Color(0xFF999999),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+            ],
           ),
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: const Text('긴급 전화'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.black,
-      ),
-      body: Stack(
-        children: [
-          // 메인과 같은 그라데이션 배경
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              color: Colors.white,
+  Widget _buildEmergencyButton({
+    required String emoji,
+    required String number,
+    required String subtitle,
+    required Color emojiBgColor,
+    required Color arrowBgColor,
+    required Color arrowIconColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 84,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFF0F0F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-          ),
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                Color.fromARGB(255, 240, 249, 234), // 연두 화이트
-                Color.fromARGB(255, 220, 242, 214), // 파스텔 연두
-                Color.fromARGB(255, 220, 242, 214),
-                Color.fromARGB(255, 240, 249, 234),
-                ],
-                stops: [0.0, 0.3, 0.7, 1.0],
+          ],
+        ),
+        child: Row(
+          children: [
+            // 이모지 아이콘
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: emojiBgColor,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Center(
+                child: Text(emoji, style: const TextStyle(fontSize: 26)),
               ),
             ),
-          ),
-            // 버튼 영역
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            const SizedBox(width: 16),
+            // 텍스트
+            Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _glassButton(
-                    label: '119',
-                    icon: Icons.local_hospital,
-                    color: Colors.red.shade700,
-                    onTap: () => _makePhoneCall('119', '119'),
+                  Text(
+                    number,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF333333),
+                    ),
                   ),
-                  const SizedBox(height: 40),
-                  _glassButton(
-                    label: '112',
-                    icon: Icons.local_police,
-                    color: Colors.red.shade700,
-                    onTap: () => _makePhoneCall('112', '112'),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFFBBBBBB),
+                    ),
                   ),
                 ],
+              ),
+            ),
+            // 전화 아이콘
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: arrowBgColor,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.call,
+                size: 18,
+                color: arrowIconColor,
               ),
             ),
           ],
         ),
-      // ),
+      ),
     );
   }
 }

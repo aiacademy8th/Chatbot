@@ -5,6 +5,7 @@ import 'insurer.dart';
 import 'photo.dart';
 import 'chat.dart';
 import 'emergency.dart';
+import 'board_list.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:ui';
 import 'package:animated_text_kit/animated_text_kit.dart';
@@ -42,11 +43,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _justMadeCall = false;
   String _lastServiceName = '';
-  Key _typingTextKey = UniqueKey();
-
-  // 글래스모피즘 색상 테마
-  static const Color darkTextColor = Color.fromARGB(255, 45, 58, 44);
-  static const Color subtitleColor = Color.fromARGB(255, 92, 110, 90);
 
   @override
   void initState() {
@@ -64,10 +60,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _justMadeCall) {
       _justMadeCall = false;
-      setState(() {
-        _typingTextKey = UniqueKey();
-      });
-
       if (_justMadeCall) {
         _justMadeCall = false;
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -108,45 +100,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: true,
       builder: (BuildContext dialogContext) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: AlertDialog(
-            backgroundColor: Colors.white.withOpacity(0.85),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: Row(
-              children: [
-                Icon(Icons.camera_alt, color: Colors.orange.shade700),
-                const SizedBox(width: 8),
-                const Text('사진 촬영'),
-              ],
-            ),
-            content: Text(
-              '$serviceName 통화가 끝나셨나요?\n사고 현장 사진을 촬영하시겠습니까?',
-              style: const TextStyle(fontSize: 16),
-            ),
-            actions: [
-              TextButton(
-                child: const Text('나중에'),
-                onPressed: () => Navigator.pop(dialogContext),
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.camera_alt, size: 20),
-                label: const Text('사진 촬영하기'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const PhotoScreen()),
-                  );
-                },
-              ),
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(Icons.camera_alt, color: Colors.orange.shade700),
+              const SizedBox(width: 8),
+              const Text('사진 촬영'),
             ],
           ),
+          content: Text(
+            '$serviceName 통화가 끝나셨나요?\n사고 현장 사진을 촬영하시겠습니까?',
+            style: const TextStyle(fontSize: 18),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('나중에'),
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.camera_alt, size: 20),
+              label: const Text('사진 촬영하기'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const PhotoScreen()),
+                );
+              },
+            ),
+          ],
         );
       },
     );
@@ -155,68 +144,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: const Color(0xFFFAFAF8),
       appBar: AppBar(
-        toolbarHeight: 100,
-        centerTitle: false,
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 60,
+        centerTitle: false,
         titleSpacing: 20,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text(
-              '교통사고 AI 상담사',
-              style: TextStyle(
-                color: darkTextColor,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 4),
-         ],
+        title: const Text(
+          '교통사고 AI 상담사',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF222222),
+          ),
         ),
         actions: [
           Center(
             child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: Container(
-                    height: 34,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.35),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.6),
-                        width: 1.2,
+              padding: const EdgeInsets.only(right: 16),
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const BoardListScreen()),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF222222),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.assignment, size: 16, color: Colors.white),
+                      SizedBox(width: 5),
+                      Text(
+                        '게시판',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    child: InkWell(
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('게시판 화면으로 이동 (준비중)')),
-                        );
-                      },
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.assignment, size: 15, color: darkTextColor),
-                          SizedBox(width: 5),
-                          Text(
-                            '게시판',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: darkTextColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ),
                 ),
               ),
@@ -224,101 +197,171 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // 배경 그라데이션
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                Color.fromARGB(255, 234, 246, 248),
-                Color.fromARGB(255, 215, 238, 242),
-                Color.fromARGB(255, 215, 238, 242),
-                Color.fromARGB(255, 234, 246, 248),
-                ],
-                stops: [0.0, 0.3, 0.7, 1.0],
-              ),
-            ),
-          ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 16),
 
-          // 메인 콘텐츠
-          SafeArea(
-            child: Padding(
+            // 히어로 카드
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-
-                  // 안내문
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    // 장식 blob
+                    Positioned(
+                      top: 0,
+                      right: 0,
                       child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+                        width: 36,
+                        height: 36,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFE8F5E9),
+                          shape: BoxShape.circle,
                         ),
-                        child: DefaultTextStyle(
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: subtitleColor,
-                            height: 1.6,
-                          ),
-                          child: AnimatedTextKit(
-                            key: _typingTextKey,
-                            isRepeatingAnimation: false,
-                            animatedTexts: [
-                              TypewriterAnimatedText(
-                                '걱정하지 마세요, 저희가 함께할게요.\n안전하고 편안한 사고 처리를 도와드려요.',
-                                speed: const Duration(milliseconds: 100),
-                                cursor: '|',
-                              ),
-                            ],
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFE3F2FD),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 30,
+                      left: 0,
+                      child: Transform.rotate(
+                        angle: 0.35,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                         ),
                       ),
                     ),
-                  ),
+                    // 메인 내용
+                    Center(
+                      child: Column(
+                        children: const [
+                          Text(
+                            '🚗💨',
+                            style: TextStyle(fontSize: 42),
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            '걱정하지 마세요!',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF222222),
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            '안전하고 편안한 사고 처리를 도와드려요',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Color(0xFFAAAAAA),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
-                  const Spacer(),
+            const SizedBox(height: 24),
 
-                  // 버튼 3개
-                  GlassButton(
-                    icon: Icons.warning_amber_rounded,
-                    text: '긴급 전화',
-                    accentColor: Colors.red,
-                    onPressed: () {
+            // 섹션 라벨 (타이핑 애니메이션)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              child: DefaultTextStyle(
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFAAAAAA),
+                  letterSpacing: 0.3,
+                ),
+                child: AnimatedTextKit(
+                  isRepeatingAnimation: false,
+                  animatedTexts: [
+                    TypewriterAnimatedText(
+                      '어떤 도움이 필요하세요?',
+                      speed: const Duration(milliseconds: 80),
+                      cursor: '|',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const Spacer(),
+
+            // 버튼 3개
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  _buildMenuButton(
+                    emoji: '🚨',
+                    title: '긴급 전화',
+                    subtitle: '119 · 112 바로 연결',
+                    bgColor: const Color(0xFFFFEBEE),
+                    arrowColor: const Color(0xFFE53935),
+                    onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const EmergencyScreen()),
                       );
                     },
                   ),
-                  const SizedBox(height: 16),
-                  GlassButton(
-                    icon: Icons.forum,
-                    text: '보험사 연결',
-                    accentColor: const Color(0xFF2985FC),
-                    onPressed: () {
+                  const SizedBox(height: 10),
+                  _buildMenuButton(
+                    emoji: '🏢',
+                    title: '보험사 연결',
+                    subtitle: '내 보험사 찾기',
+                    bgColor: const Color(0xFFE3F2FD),
+                    arrowColor: const Color(0xFF2985FC),
+                    onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const InsurerScreen()),
                       );
                     },
                   ),
-                  const SizedBox(height: 16),
-                  GlassButton(
-                    icon: Icons.chat,
-                    text: '사고 상담',
-                    accentColor: const Color.fromARGB(255, 107, 167, 18),
-                    onPressed: () {
+                  const SizedBox(height: 10),
+                  _buildMenuButton(
+                    emoji: '💬',
+                    title: '사고 상담',
+                    subtitle: 'AI 과실 비율 분석',
+                    bgColor: const Color(0xFFF1F8E9),
+                    arrowColor: const Color(0xFF6BA712),
+                    onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -327,95 +370,143 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
-
-                  const SizedBox(height: 40),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  // 배경 장식용 글로우 원
-  Widget _buildGlowCircle(double size, Color color) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color,
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.3),
-            blurRadius: 40,
-            spreadRadius: 10,
-          ),
-        ],
-      ),
-    );
-  }
-}
+            const SizedBox(height: 16),
 
-// 글래스모피즘 버튼 (원래 디자인)
-class GlassButton extends StatelessWidget {
-  final VoidCallback onPressed;
-  final IconData icon;
-  final String text;
-  final Color accentColor;
-
-  const GlassButton({
-    super.key,
-    required this.onPressed,
-    required this.icon,
-    required this.text,
-    required this.accentColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: MediaQuery.of(context).size.width - 40,
-      height: 80,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-          child: InkWell(
-            onTap: onPressed,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.25),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.4),
+            // 하단 팁 카드
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFF0F0F0)),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: accentColor.withOpacity(0.25),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+                child: Row(
+                  children: const [
+                    Text('💡', style: TextStyle(fontSize: 20)),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '팁! ',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF666666),
+                              ),
+                            ),
+                            TextSpan(
+                              text: '사진이 많을수록 정확한 분석이 가능해요',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Color(0xFF999999),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Row(
+            ),
+
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuButton({
+    required String emoji,
+    required String title,
+    required String subtitle,
+    required Color bgColor,
+    required Color arrowColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 74,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFF0F0F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // 이모지 아이콘
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Center(
+                child: Text(emoji, style: const TextStyle(fontSize: 24)),
+              ),
+            ),
+            const SizedBox(width: 14),
+            // 텍스트
+            Expanded(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(icon, size: 32, color: accentColor),
-                  const SizedBox(width: 12),
                   Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: accentColor,
+                    title,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFFBBBBBB),
                     ),
                   ),
                 ],
               ),
             ),
-          ),
+            // 화살표
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: bgColor,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                size: 24,
+                color: arrowColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
