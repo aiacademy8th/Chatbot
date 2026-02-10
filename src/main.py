@@ -72,7 +72,11 @@ app = FastAPI(
 # CORS 미들웨어 추가
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 모든 origin 허용 (개발 중)
+    allow_origins=[
+        "https://accident-detection-db-485509.web.app",
+        "https://accident-detection-db-485509.firebaseapp.com",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'result.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'dart:io';
 
 class ChatbotScreen extends StatefulWidget {
   final List<XFile> accidentPhotos;
@@ -36,7 +35,16 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   bool _inChatMode = false;
   String? _currentThreadId;
 
-  final String baseUrl = dotenv.env['BACKEND_URL'] ?? "";
+  // final String baseUrl = dotenv.env['BACKEND_URL'] ?? "";
+
+  String get _baseUrl {
+    final url = dotenv.env['BACKEND_URL'] ?? "";
+    if (url.isEmpty) {
+      debugPrint("⚠️ 경고: BACKEND_URL이 설정되지 않았습니다.");
+      // 개발 단계에서 문제를 빨리 파악할 수 있도록 에러를 던지거나 기본값 설정
+    }
+    return url;
+  }
 
   final List<QuestionData> _questions = [
     QuestionData(
@@ -244,28 +252,52 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     return buffer.toString();
   }
 
-  Future<Map<String, dynamic>> _callBackendAnalysis(String prompt) async {
-    final url = Uri.parse('$baseUrl/analyze');
+Future<Map<String, dynamic>> _callBackendAnalysis(String prompt) async {
+    // 1. 노란 줄이 떴던 프라이빗 게터(_baseUrl)를 호출합니다.
+    final String currentBaseUrl = _baseUrl;
+
+    // 2. 주소가 비어있는지 확인하여 오류를 사전에 방지합니다.
+    if (currentBaseUrl.isEmpty) {
+      throw Exception('.env 파일에서 BACKEND_URL을 읽어오지 못했습니다. assets/.env 설정과 main.dart 로드 경로를 확인하세요.');
+    }
+
+    // 3. 주소 끝의 슬래시(/)를 제거한 후 /analyze를 붙여 정확한 전체 주소를 생성합니다.
+    final String cleanUrl = currentBaseUrl.endsWith('/') 
+        ? currentBaseUrl.substring(0, currentBaseUrl.length - 1) 
+        : currentBaseUrl;
+    
+    final url = Uri.parse('$cleanUrl/analyze');
+    
+    // 디버깅을 위해 실제 요청이 가는 주소를 콘솔에 출력합니다.
+    debugPrint('🚀 API 요청 주소: $url');
+
+    // 4. Multipart 요청 생성
     final request = http.MultipartRequest('POST', url);
 
+    // 텍스트 쿼리 추가
     request.fields['text_query'] = prompt;
 
+    // 5. 이미지 파일 추가 (웹 환경 호환 방식)
     for (var photo in widget.accidentPhotos) {
-      request.files.add(await http.MultipartFile.fromBytes(
+      final bytes = await photo.readAsBytes();
+      request.files.add(http.MultipartFile.fromBytes(
         'image_files',
-        await photo.readAsBytes(),
+        bytes,
         filename: photo.name,
       ));
     }
 
-    final response = await request.send();
+    // 6. 서버로 요청 전송 및 응답 처리
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode == 200) {
-      final responseBody = await response.stream.bytesToString();
+      // 한글 깨짐 방지를 위해 utf8로 디코딩합니다.
+      final responseBody = utf8.decode(response.bodyBytes);
       final data = jsonDecode(responseBody);
       return data;
     } else {
-      final errorBody = await response.stream.bytesToString();
+      final errorBody = utf8.decode(response.bodyBytes);
       throw Exception('API 호출 실패: ${response.statusCode}\n$errorBody');
     }
   }
@@ -276,7 +308,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     });
 
     try {
-      final url = Uri.parse('$baseUrl/chat');
+      final url = Uri.parse('$_baseUrl/chat');
       final response = await http.post(
         url,
         headers: {

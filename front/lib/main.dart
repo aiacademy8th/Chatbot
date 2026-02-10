@@ -12,7 +12,7 @@ import 'package:animated_text_kit/animated_text_kit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+  await dotenv.load(fileName: "assets/env");
   runApp(const AccidentHelperApp());
 }
 
@@ -25,7 +25,7 @@ class AccidentHelperApp extends StatelessWidget {
       title: '사고 과실 도우미',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        fontFamily: 'NotoSans',
+        fontFamily: 'NotoSansKR',
       ),
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,

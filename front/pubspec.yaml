@@ -71,7 +71,7 @@ flutter:
   assets:
     - assets/fonts/NotoSansKR-Regular.ttf
     - assets/fonts/NotoSansKR-Bold.ttf
-    - .env
+    - assets/env
 
   fonts:                                      # ← 추가
     - family: NotoSansKR
