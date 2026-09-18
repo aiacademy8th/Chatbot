@@ -6,6 +6,14 @@
 
 ---
 
+## 🎬 실행 영상 (Demo)
+
+[![실행 영상 보기](https://img.youtube.com/vi/PMnx0qh0Z1g/hqdefault.jpg)](https://www.youtube.com/shorts/PMnx0qh0Z1g)
+
+▶️ 위 썸네일을 클릭하면 YouTube에서 실행 시연 영상을 볼 수 있습니다: https://www.youtube.com/shorts/PMnx0qh0Z1g
+
+---
+
 ## 🛠️ 기술 스택
 
 `pyproject.toml` 기준 실제 의존성입니다.
